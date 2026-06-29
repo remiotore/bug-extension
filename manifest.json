@@ -1,0 +1,36 @@
+{
+  "manifest_version": 2,
+  "name": "Bug Extension",
+  "version": "1.0.0",
+  "description": "All-in-one security testing toolkit: endpoint hunting, request interception/replay, encoding tools, Wayback Machine history, and more.",
+  "author": "Bug Extension",
+
+  "icons": {
+    "48": "icons/icon-48.png",
+    "96": "icons/icon-96.png"
+  },
+
+  "permissions": [
+    "webRequest",
+    "webRequestBlocking",
+    "<all_urls>",
+    "storage",
+    "tabs",
+    "clipboardWrite",
+    "contextMenus",
+    "activeTab"
+  ],
+
+  "devtools_page": "devtools.html",
+
+  "background": {
+    "scripts": ["background.js"]
+  },
+
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "bug-extension@security",
+      "strict_min_version": "109.0"
+    }
+  }
+}

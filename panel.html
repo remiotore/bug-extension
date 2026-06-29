@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bug Extension</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+
+<body>
+  <nav id="top-nav">
+    <div class="nav-left">
+      <span class="logo">🐛</span>
+      <button class="nav-tab active" data-tab="requests" id="tab-btn-requests">Requests</button>
+      <button class="nav-tab" data-tab="endpoints" id="tab-btn-endpoints">Endpoints</button>
+      <button class="nav-tab" data-tab="tools" id="tab-btn-tools">Tools</button>
+    </div>
+    <div class="nav-right">
+      <span id="request-count" class="badge-count">0</span>
+      <button id="theme-toggle" class="icon-btn" title="Toggle theme">🌙</button>
+      <button id="clear-all-btn" class="icon-btn danger" title="Clear all">🗑️</button>
+    </div>
+  </nav>
+
+  <div id="tab-requests" class="tab-panel active">
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <input type="text" id="req-search" placeholder="Search requests...">
+
+        <select id="req-method-filter">
+          <option value="all">All Methods</option>
+          <option value="GET">GET</option>
+          <option value="POST">POST</option>
+          <option value="PUT">PUT</option>
+          <option value="DELETE">DELETE</option>
+        </select>
+
+        <select id="req-status-filter">
+          <option value="all">All Statuses</option>
+          <option value="1xx">1xx Info</option>
+          <option value="2xx">2xx Success</option>
+          <option value="3xx">3xx Redirection</option>
+          <option value="4xx">4xx Client Error</option>
+          <option value="5xx">5xx Server Error</option>
+        </select>
+
+        <select id="req-param-filter">
+          <option value="all">All Requests</option>
+          <option value="has-params">With Parameters</option>
+          <option value="no-params">Without Parameters</option>
+        </select>
+
+        <select id="req-domain-filter">
+          <option value="all">All Domains</option>
+        </select>
+      </div>
+      <div class="toolbar-right">
+        <button id="req-pause-btn" class="icon-btn" title="Pause/Resume capture">⏸️</button>
+        <button id="req-export-btn" class="icon-btn" title="Export captured URLs">📥</button>
+        <button id="req-clear-btn" class="icon-btn" title="Clear requests">🧹</button>
+      </div>
+    </div>
+
+    <div class="split-container">
+      <div class="request-list-panel" id="request-list-panel">
+        <div id="request-list" class="request-list">
+          <div class="empty-state">
+            <div class="empty-icon">📡</div>
+            <div>Listening for requests...</div>
+            <div class="empty-hint">Browse any page to start capturing</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="resize-handle" id="split-resize"></div>
+
+      <div class="request-detail-panel" id="request-detail-panel">
+        <div class="detail-section">
+          <div class="detail-tabs">
+            <button class="detail-tab active" data-detail="request">Request</button>
+            <button class="detail-tab" data-detail="response">Response</button>
+            <button class="detail-tab" data-detail="replay">Replay</button>
+            <button class="detail-tab" data-detail="fuzzer">Fuzzer</button>
+            <button class="detail-tab" data-detail="wayback">Wayback</button>
+          </div>
+          <div class="detail-actions">
+            <button id="copy-curl-btn" class="small-btn" title="Copy as cURL" disabled>cURL</button>
+            <button id="copy-python-btn" class="small-btn" title="Copy as Python" disabled>Python</button>
+            <button id="copy-fetch-btn" class="small-btn" title="Copy as fetch()" disabled>Fetch</button>
+          </div>
+        </div>
+
+        <div id="detail-request" class="detail-content active">
+          <pre id="request-display" class="code-display">Select a request from the list</pre>
+        </div>
+
+        <div id="detail-response" class="detail-content">
+          <div id="response-meta" class="response-meta"></div>
+          <pre id="response-display" class="code-display">Select a request to see its response</pre>
+        </div>
+
+        <div id="detail-replay" class="detail-content">
+          <div class="replay-toolbar">
+            <select id="replay-method" class="filter-select">
+              <option>GET</option>
+              <option>POST</option>
+              <option>PUT</option>
+              <option>DELETE</option>
+              <option>PATCH</option>
+              <option>HEAD</option>
+              <option>OPTIONS</option>
+            </select>
+            <input type="text" id="replay-url" class="search-input" placeholder="URL" style="flex:1">
+            <button id="replay-send-btn" class="primary-btn">Send</button>
+          </div>
+          <div class="replay-sections">
+            <div class="replay-section">
+              <label>Headers (one per line: Name: Value)</label>
+              <textarea id="replay-headers" class="code-editor" rows="6"
+                placeholder="Content-Type: application/json&#10;Authorization: Bearer xxx"></textarea>
+            </div>
+            <div class="replay-section">
+              <label>Body</label>
+              <textarea id="replay-body" class="code-editor" rows="8"
+                placeholder="Request body (JSON, form data, etc.)"></textarea>
+            </div>
+            <div class="replay-section">
+              <label>Response</label>
+              <div id="replay-response-meta" class="response-meta"></div>
+              <pre id="replay-response" class="code-display">Send a request to see the response</pre>
+            </div>
+          </div>
+        </div>
+
+        <div id="detail-fuzzer" class="detail-content detail-fuzzer-layout">
+
+          <div
+            style="background: var(--bg2); padding: 8px; border-radius: var(--radius); border: 1px solid var(--border);">
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span
+                style="font-family: var(--mono); font-size: 11px; color: var(--accent); font-weight: bold; min-width: 60px;">BASE
+                URL:</span>
+              <input type="text" id="fuzz-url" class="tool-input-single"
+                style="flex: 1; height: 26px; font-size: 11px; font-family: var(--mono); background: var(--bg3); margin: 0; padding: 4px 8px; border: 1px solid var(--border); color: var(--text); border-radius: var(--radius);"
+                placeholder="Select a request from history...">
+              <span style="font-size: 9px; color: var(--text3); font-weight: bold; white-space: nowrap;">OAST:</span>
+              <input type="text" id="fuzz-oast-domain" value="interact.sh"
+                style="width: 120px; height: 26px; font-size: 11px; background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 0 6px; border-radius: var(--radius); box-sizing: border-box; font-family: var(--mono); margin: 0;">
+              <button id="fuzz-start-btn" class="tool-btn primary"
+                style="height: 26px; padding: 0 12px; font-size: 11px; font-weight: bold; white-space: nowrap; margin: 0;">🚀
+                Fire Attack</button>
+            </div>
+          </div>
+
+          <div
+            style="flex: 1; display: flex; flex-direction: column; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; box-sizing: border-box; overflow: hidden;">
+            <div
+              style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 4px; margin-bottom: 6px;">
+              <span style="font-size: 10px; font-weight: bold; color: var(--text2); text-transform: uppercase;">🎯
+                Targets Setup</span>
+              <button id="fuzz-add-param-btn" class="tool-btn"
+                style="height: 18px; padding: 0 6px; font-size: 10px; margin: 0; background: var(--bg3);">+ Add
+                Param</button>
+            </div>
+            <div class="fuzz-param-header"
+              style="display: flex; gap: 4px; align-items: center; padding: 2px 4px; margin-bottom: 4px; font-size: 9px; font-weight: bold; color: var(--text3); text-transform: uppercase;">
+              <span style="width: 18px; text-align: center;">⚡</span>
+              <span style="min-width: 50px; text-align: center;">Type</span>
+              <span style="flex: 0.8;">Key</span>
+              <span style="flex: 1.2;">Original Value</span>
+              <span style="flex: 1.4;">Dictionary</span>
+              <span style="width: 18px;"></span>
+            </div>
+            <div id="fuzz-param-list-container"
+              style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
+              <div class="empty-hint" style="text-align: center; margin-top: 20px;">No parameters loaded. Choose a
+                request from history.</div>
+            </div>
+          </div>
+
+        </div>
+
+        <div
+          style="background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; display: flex; flex-direction: column; max-height: 120px;">
+          <span
+            style="font-size: 9px; font-weight: bold; color: var(--text3); text-transform: uppercase; margin-bottom: 2px;">Pipeline
+            Execution Console Logs</span>
+          <div id="fuzz-results"
+            style="background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; font-family: var(--mono); font-size: 11px; overflow-y: auto; min-height: 50px; color: var(--text);">
+            <div class="empty-hint">Waiting for attack sequence authorization execution...</div>
+          </div>
+        </div>
+
+      </div>
+
+      <div id="detail-wayback" class="detail-content">
+        <div class="wayback-detail-container">
+          <div class="wayback-search-bar">
+            <input type="text" id="wayback-url-input" class="tool-input-single"
+              placeholder="Enter URL to check archive history..." style="flex: 1;">
+            <button id="wayback-check-btn" class="tool-btn primary"
+              style="height: 30px; padding: 0 12px; font-size: 11px; white-space: nowrap;">🔍 Check</button>
+            <button id="wayback-open-btn" class="tool-btn"
+              style="height: 30px; padding: 0 12px; font-size: 11px; white-space: nowrap;">🌐 Open in Archive</button>
+          </div>
+          <div id="wayback-results" class="wayback-results-box">
+            <div class="empty-hint">Enter a URL to check its archive history</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <div id="tab-endpoints" class="tab-panel">
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <input type="text" id="ep-search" placeholder="Search endpoints..." class="search-input">
+        <select id="ep-domain-filter" class="filter-select">
+          <option value="all">All Domains</option>
+        </select>
+        <button id="ep-sensitive-btn" class="tag-toggle-btn" title="Show only sensitive">🛡️ Sensitive</button>
+      </div>
+      <div class="toolbar-right">
+        <button id="ep-export-btn" class="icon-btn" title="Export endpoints as JSON">📥</button>
+        <button id="ep-export-urls-btn" class="icon-btn" title="Export URLs only">📋</button>
+        <button id="ep-clear-btn" class="icon-btn danger" title="Clear endpoints">🗑️</button>
+      </div>
+    </div>
+
+    <div id="tag-filters" class="tag-filters">
+      <button class="tag-filter tag-xss" data-tag="xss">XSS</button>
+      <button class="tag-filter tag-sqli" data-tag="sqli">SQLi</button>
+      <button class="tag-filter tag-lfi" data-tag="lfi">LFI</button>
+      <button class="tag-filter tag-idor" data-tag="idor">IDOR</button>
+      <button class="tag-filter tag-rce" data-tag="rce">RCE</button>
+      <button class="tag-filter tag-ssrf" data-tag="ssrf">SSRF</button>
+      <button class="tag-filter tag-auth" data-tag="auth">AUTH</button>
+    </div>
+
+    <div id="endpoint-list" class="endpoint-list">
+      <div class="empty-state">
+        <div class="empty-icon">🎯</div>
+        <div>No endpoints detected yet</div>
+        <div class="empty-hint">Browse pages to auto-discover endpoints and parameters</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-tools" class="tab-panel">
+    <div class="tools-grid">
+      <div class="tool-card">
+        <h3>🔄 Encoder / Decoder</h3>
+        <div class="tool-row">
+          <textarea id="tool-input" class="tool-textarea" rows="4"
+            placeholder="Enter text to encode/decode..."></textarea>
+        </div>
+        <div class="tool-buttons">
+          <button class="tool-btn" data-action="base64-encode">Base64 Encode</button>
+          <button class="tool-btn" data-action="base64-decode">Base64 Decode</button>
+          <button class="tool-btn" data-action="url-encode">URL Encode</button>
+          <button class="tool-btn" data-action="url-decode">URL Decode</button>
+          <button class="tool-btn" data-action="url-encode-all">URL Encode (All)</button>
+          <button class="tool-btn" data-action="html-encode">HTML Encode</button>
+          <button class="tool-btn" data-action="html-decode">HTML Decode</button>
+          <button class="tool-btn" data-action="hex-encode">Hex Encode</button>
+          <button class="tool-btn" data-action="hex-decode">Hex Decode</button>
+          <button class="tool-btn" data-action="unicode-escape">Unicode Escape</button>
+          <button class="tool-btn" data-action="unicode-unescape">Unicode Unescape</button>
+        </div>
+        <div class="tool-row">
+          <textarea id="tool-output" class="tool-textarea" rows="4" placeholder="Result will appear here..."
+            readonly></textarea>
+          <button id="tool-copy-btn" class="icon-btn copy-btn" title="Copy result">📋</button>
+          <button id="tool-swap-btn" class="icon-btn" title="Swap input ↔ output">🔃</button>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <h3>🔑 JWT Decoder</h3>
+        <div class="tool-row">
+          <textarea id="jwt-input" class="tool-textarea" rows="3" placeholder="Paste JWT token here..."></textarea>
+        </div>
+        <button id="jwt-decode-btn" class="tool-btn primary">Decode JWT</button>
+        <div class="tool-row">
+          <pre id="jwt-output" class="code-display jwt-output">Decoded JWT will appear here</pre>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <h3>🔒 Hash Generator</h3>
+        <div class="tool-row">
+          <textarea id="hash-input" class="tool-textarea" rows="2" placeholder="Enter text to hash..."></textarea>
+        </div>
+        <div class="tool-buttons">
+          <button class="hash-btn tool-btn" data-algo="SHA-1">SHA-1</button>
+          <button class="hash-btn tool-btn" data-algo="SHA-256">SHA-256</button>
+          <button class="hash-btn tool-btn" data-algo="SHA-384">SHA-384</button>
+          <button class="hash-btn tool-btn" data-algo="SHA-512">SHA-512</button>
+          <button class="hash-btn tool-btn" data-algo="MD5">MD5</button>
+        </div>
+        <div class="tool-row">
+          <input id="hash-output" class="tool-input-single" readonly placeholder="Hash result...">
+          <button class="icon-btn copy-btn" id="hash-copy-btn" title="Copy">📋</button>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <h3>🕰️ Wayback Machine Quick Lookup</h3>
+        <div class="tool-row">
+          <input id="wb-url-input" class="tool-input-single" placeholder="Enter URL...">
+          <button id="wb-quick-check" class="tool-btn primary">Check</button>
+        </div>
+        <div id="wb-quick-result" class="wb-result">
+          <div class="empty-hint">Enter a URL to check its archive history</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="panel-ctx-menu" class="ctx-menu hidden">
+    <div class="ctx-item" data-action="ctx-base64-encode">Base64 Encode</div>
+    <div class="ctx-item" data-action="ctx-base64-decode">Base64 Decode</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" data-action="ctx-url-encode">URL Encode</div>
+    <div class="ctx-item" data-action="ctx-url-decode">URL Decode</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" data-action="ctx-copy">Copy</div>
+  </div>
+
+  <script src="panel.js"></script>
+</body>
+
+</html>
