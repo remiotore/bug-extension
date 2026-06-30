@@ -48,6 +48,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .search-input { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 5px 10px; border-radius: var(--radius); font-size: 12px; outline: none; min-width: 180px; }
 .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(88,166,255,.15); }
 .filter-select { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 5px 8px; border-radius: var(--radius); font-size: 12px; cursor: pointer; }
+.filter-select.multi-select { min-width: 132px; max-height: 88px; }
 
 /* ─── Split container ─── */
 .split-container { display: flex; flex: 1; overflow: hidden; }
@@ -75,6 +76,17 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .req-status.s4xx { color: var(--danger); }
 .req-status.s5xx { color: #f778ba; }
 .req-type { font-size: 10px; color: var(--text3); max-width: 50px; overflow: hidden; text-overflow: ellipsis; }
+.req-findings { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; margin-left: auto; max-width: 180px; }
+.req-finding-chip { font-size: 9px; padding: 1px 6px; border-radius: 999px; font-weight: 700; letter-spacing: .2px; white-space: nowrap; border: 1px solid transparent; }
+.req-finding-chip.sensitive { background: rgba(248,81,73,.16); color: var(--danger); border-color: rgba(248,81,73,.28); }
+.req-finding-chip.xss { background: rgba(163,113,247,.16); color: var(--tag-xss); border-color: rgba(163,113,247,.28); }
+.req-finding-chip.sqli { background: rgba(57,210,224,.16); color: var(--tag-sqli); border-color: rgba(57,210,224,.28); }
+.req-finding-chip.lfi { background: rgba(161,136,127,.16); color: var(--tag-lfi); border-color: rgba(161,136,127,.28); }
+.req-finding-chip.idor { background: rgba(88,166,255,.16); color: var(--tag-idor); border-color: rgba(88,166,255,.28); }
+.req-finding-chip.rce { background: rgba(248,81,73,.16); color: var(--tag-rce); border-color: rgba(248,81,73,.28); }
+.req-finding-chip.ssrf { background: rgba(219,97,162,.16); color: var(--tag-ssrf); border-color: rgba(219,97,162,.28); }
+.req-finding-chip.auth { background: rgba(240,136,62,.16); color: var(--tag-auth); border-color: rgba(240,136,62,.28); }
+.req-item.has-findings { box-shadow: inset 0 0 0 1px rgba(88,166,255,.1), inset 4px 0 0 var(--accent); }
 
 /* ─── Detail section ─── */
 .detail-section { display: flex; justify-content: space-between; align-items: center; padding: 4px 10px; background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0; }

@@ -13,8 +13,6 @@
     <div class="nav-left">
       <span class="logo">🐛</span>
       <button class="nav-tab active" data-tab="requests" id="tab-btn-requests">Requests</button>
-      <button class="nav-tab" data-tab="endpoints" id="tab-btn-endpoints">Endpoints</button>
-      <button class="nav-tab" data-tab="tools" id="tab-btn-tools">Tools</button>
     </div>
     <div class="nav-right">
       <span id="request-count" class="badge-count">0</span>
@@ -28,16 +26,16 @@
       <div class="toolbar-left">
         <input type="text" id="req-search" placeholder="Search requests...">
 
-        <select id="req-method-filter">
-          <option value="all">All Methods</option>
+        <select id="req-method-filter" class="filter-select multi-select" multiple size="4" title="Filter by method">
+          <option value="all" selected>All Methods</option>
           <option value="GET">GET</option>
           <option value="POST">POST</option>
           <option value="PUT">PUT</option>
           <option value="DELETE">DELETE</option>
         </select>
 
-        <select id="req-status-filter">
-          <option value="all">All Statuses</option>
+        <select id="req-status-filter" class="filter-select multi-select" multiple size="4" title="Filter by status">
+          <option value="all" selected>All Statuses</option>
           <option value="1xx">1xx Info</option>
           <option value="2xx">2xx Success</option>
           <option value="3xx">3xx Redirection</option>
@@ -45,15 +43,29 @@
           <option value="5xx">5xx Server Error</option>
         </select>
 
-        <select id="req-param-filter">
-          <option value="all">All Requests</option>
+        <select id="req-param-filter" class="filter-select multi-select" multiple size="4" title="Filter by parameters">
+          <option value="all" selected>All Requests</option>
           <option value="has-params">With Parameters</option>
           <option value="no-params">Without Parameters</option>
         </select>
 
-        <select id="req-domain-filter">
-          <option value="all">All Domains</option>
+        <select id="req-domain-filter" class="filter-select multi-select" multiple size="4" title="Filter by domain">
+          <option value="all" selected>All Domains</option>
         </select>
+
+        <select id="req-extension-filter" class="filter-select multi-select" multiple size="4" title="Filter by extension">
+          <option value="all" selected>All Extensions</option>
+        </select>
+      </div>
+      <div id="req-finding-tags" class="tag-filters" style="padding: 0 10px 8px; gap: 6px;">
+        <button class="tag-filter tag-xss" data-tag="xss">XSS</button>
+        <button class="tag-filter tag-sqli" data-tag="sqli">SQLi</button>
+        <button class="tag-filter tag-lfi" data-tag="lfi">LFI</button>
+        <button class="tag-filter tag-idor" data-tag="idor">IDOR</button>
+        <button class="tag-filter tag-rce" data-tag="rce">RCE</button>
+        <button class="tag-filter tag-ssrf" data-tag="ssrf">SSRF</button>
+        <button class="tag-filter tag-auth" data-tag="auth">AUTH</button>
+        <button class="tag-filter tag-sensitive" data-tag="sensitive">Sensitive</button>
       </div>
       <div class="toolbar-right">
         <button id="req-pause-btn" class="icon-btn" title="Pause/Resume capture">⏸️</button>
@@ -210,112 +222,6 @@
         </div>
       </div>
     </div>
-  </div>
-  </div>
-
-  <div id="tab-endpoints" class="tab-panel">
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <input type="text" id="ep-search" placeholder="Search endpoints..." class="search-input">
-        <select id="ep-domain-filter" class="filter-select">
-          <option value="all">All Domains</option>
-        </select>
-        <button id="ep-sensitive-btn" class="tag-toggle-btn" title="Show only sensitive">🛡️ Sensitive</button>
-      </div>
-      <div class="toolbar-right">
-        <button id="ep-export-btn" class="icon-btn" title="Export endpoints as JSON">📥</button>
-        <button id="ep-export-urls-btn" class="icon-btn" title="Export URLs only">📋</button>
-        <button id="ep-clear-btn" class="icon-btn danger" title="Clear endpoints">🗑️</button>
-      </div>
-    </div>
-
-    <div id="tag-filters" class="tag-filters">
-      <button class="tag-filter tag-xss" data-tag="xss">XSS</button>
-      <button class="tag-filter tag-sqli" data-tag="sqli">SQLi</button>
-      <button class="tag-filter tag-lfi" data-tag="lfi">LFI</button>
-      <button class="tag-filter tag-idor" data-tag="idor">IDOR</button>
-      <button class="tag-filter tag-rce" data-tag="rce">RCE</button>
-      <button class="tag-filter tag-ssrf" data-tag="ssrf">SSRF</button>
-      <button class="tag-filter tag-auth" data-tag="auth">AUTH</button>
-    </div>
-
-    <div id="endpoint-list" class="endpoint-list">
-      <div class="empty-state">
-        <div class="empty-icon">🎯</div>
-        <div>No endpoints detected yet</div>
-        <div class="empty-hint">Browse pages to auto-discover endpoints and parameters</div>
-      </div>
-    </div>
-  </div>
-
-  <div id="tab-tools" class="tab-panel">
-    <div class="tools-grid">
-      <div class="tool-card">
-        <h3>🔄 Encoder / Decoder</h3>
-        <div class="tool-row">
-          <textarea id="tool-input" class="tool-textarea" rows="4"
-            placeholder="Enter text to encode/decode..."></textarea>
-        </div>
-        <div class="tool-buttons">
-          <button class="tool-btn" data-action="base64-encode">Base64 Encode</button>
-          <button class="tool-btn" data-action="base64-decode">Base64 Decode</button>
-          <button class="tool-btn" data-action="url-encode">URL Encode</button>
-          <button class="tool-btn" data-action="url-decode">URL Decode</button>
-          <button class="tool-btn" data-action="url-encode-all">URL Encode (All)</button>
-          <button class="tool-btn" data-action="html-encode">HTML Encode</button>
-          <button class="tool-btn" data-action="html-decode">HTML Decode</button>
-          <button class="tool-btn" data-action="hex-encode">Hex Encode</button>
-          <button class="tool-btn" data-action="hex-decode">Hex Decode</button>
-          <button class="tool-btn" data-action="unicode-escape">Unicode Escape</button>
-          <button class="tool-btn" data-action="unicode-unescape">Unicode Unescape</button>
-        </div>
-        <div class="tool-row">
-          <textarea id="tool-output" class="tool-textarea" rows="4" placeholder="Result will appear here..."
-            readonly></textarea>
-          <button id="tool-copy-btn" class="icon-btn copy-btn" title="Copy result">📋</button>
-          <button id="tool-swap-btn" class="icon-btn" title="Swap input ↔ output">🔃</button>
-        </div>
-      </div>
-
-      <div class="tool-card">
-        <h3>🔑 JWT Decoder</h3>
-        <div class="tool-row">
-          <textarea id="jwt-input" class="tool-textarea" rows="3" placeholder="Paste JWT token here..."></textarea>
-        </div>
-        <button id="jwt-decode-btn" class="tool-btn primary">Decode JWT</button>
-        <div class="tool-row">
-          <pre id="jwt-output" class="code-display jwt-output">Decoded JWT will appear here</pre>
-        </div>
-      </div>
-
-      <div class="tool-card">
-        <h3>🔒 Hash Generator</h3>
-        <div class="tool-row">
-          <textarea id="hash-input" class="tool-textarea" rows="2" placeholder="Enter text to hash..."></textarea>
-        </div>
-        <div class="tool-buttons">
-          <button class="hash-btn tool-btn" data-algo="SHA-1">SHA-1</button>
-          <button class="hash-btn tool-btn" data-algo="SHA-256">SHA-256</button>
-          <button class="hash-btn tool-btn" data-algo="SHA-384">SHA-384</button>
-          <button class="hash-btn tool-btn" data-algo="SHA-512">SHA-512</button>
-          <button class="hash-btn tool-btn" data-algo="MD5">MD5</button>
-        </div>
-        <div class="tool-row">
-          <input id="hash-output" class="tool-input-single" readonly placeholder="Hash result...">
-          <button class="icon-btn copy-btn" id="hash-copy-btn" title="Copy">📋</button>
-        </div>
-      </div>
-
-      <div class="tool-card">
-        <h3>🕰️ Wayback Machine Quick Lookup</h3>
-        <div class="tool-row">
-          <input id="wb-url-input" class="tool-input-single" placeholder="Enter URL...">
-          <button id="wb-quick-check" class="tool-btn primary">Check</button>
-        </div>
-        <div id="wb-quick-result" class="wb-result">
-          <div class="empty-hint">Enter a URL to check its archive history</div>
-        </div>
-      </div>
 
     </div>
   </div>

@@ -3,7 +3,7 @@
 // Combines: request capture (rep+), endpoint hunting, context menus
 // ============================================================
 
-const ports = new Set();
+const connectedPanels = new Map(); // Track active devtools tabs: tabId -> port
 const requestMap = new Map();
 
 // ── Endpoint Hunter state ──
@@ -88,6 +88,24 @@ function saveEndpoints() {
 }
 
 // Load persisted endpoints
+// Clear endpoints on start/close per user request
+function clearEndpointsStorage() {
+  endpoints.clear();
+  dynamicPatterns.clear();
+  try { browser.storage.local.remove(['endpoints', 'dynamicPatterns', 'lastUpdate']); } catch (e) {}
+}
+
+// Run immediately on load so previous sessions are not restored
+clearEndpointsStorage();
+
+// Also register lifecycle hooks to clear on uninstall/start/shutdown when available
+try {
+  if (browser.runtime && browser.runtime.onInstalled) browser.runtime.onInstalled.addListener(clearEndpointsStorage);
+  if (browser.runtime && browser.runtime.onStartup) browser.runtime.onStartup.addListener(clearEndpointsStorage);
+  if (browser.runtime && browser.runtime.onSuspend) browser.runtime.onSuspend.addListener(clearEndpointsStorage);
+} catch (e) {}
+
+// Still attempt to load persisted endpoints if anything remains (should be empty)
 browser.storage.local.get(['endpoints', 'dynamicPatterns']).then(data => {
   if (data.endpoints) {
     endpoints = new Map(data.endpoints.map(e => [e.method + ' ' + e.url, e]));
@@ -116,11 +134,13 @@ function parseRequestBody(requestBody) {
   return null;
 }
 
-// ── WebRequest listeners ──
+
+// ── 1. BEFORE REQUEST LISTENER ──
 function handleBeforeRequest(details) {
   if (details.url.startsWith('moz-extension://')) return;
 
-  // Store for rep+ capture
+  if (!connectedPanels.has(details.tabId)) return;
+
   requestMap.set(details.requestId, {
     requestId: details.requestId,
     url: details.url,
@@ -133,7 +153,10 @@ function handleBeforeRequest(details) {
   });
 }
 
+// ── 2. HEADERS LISTENER ──
 function handleBeforeSendHeaders(details) {
+  if (!connectedPanels.has(details.tabId)) return;
+
   const req = requestMap.get(details.requestId);
   if (req) {
     req.requestHeaders = details.requestHeaders;
@@ -143,7 +166,8 @@ function handleBeforeSendHeaders(details) {
 function handleCompleted(details) {
   if (details.url.startsWith('moz-extension://')) return;
 
-  // ── Rep+ capture: send to panel ──
+  if (!connectedPanels.has(details.tabId)) return;
+
   const req = requestMap.get(details.requestId);
   if (req) {
     req.statusCode = details.statusCode;
@@ -151,12 +175,21 @@ function handleCompleted(details) {
     req.responseHeaders = details.responseHeaders;
 
     const message = { type: 'captured_request', data: req };
-    ports.forEach(p => {
-      try { p.postMessage(message); } catch { ports.delete(p); }
-    });
+    
+    const targetPort = connectedPanels.get(details.tabId);
+    if (targetPort) {
+      try { 
+        targetPort.postMessage(message); 
+      } catch { 
+        connectedPanels.delete(details.tabId); 
+      }
+    }
     requestMap.delete(details.requestId);
   }
 
+  // ── Endpoint Hunter: detect and store ──
+  if (!isTargetTab(details.tabId)) return;
+  
   // ── Endpoint Hunter: detect and store ──
   if (!isInteresting(details)) return;
   let url;
@@ -209,17 +242,81 @@ function handleErrorOccurred(details) {
   requestMap.delete(details.requestId);
 }
 
+
 // Register listeners
 browser.webRequest.onBeforeRequest.addListener(handleBeforeRequest, { urls: ["<all_urls>"] }, ["requestBody"]);
 browser.webRequest.onBeforeSendHeaders.addListener(handleBeforeSendHeaders, { urls: ["<all_urls>"] }, ["requestHeaders"]);
 browser.webRequest.onCompleted.addListener(handleCompleted, { urls: ["<all_urls>"] }, ["responseHeaders"]);
 browser.webRequest.onErrorOccurred.addListener(handleErrorOccurred, { urls: ["<all_urls>"] });
 
-// ── DevTools port connections ──
+// ── Port Handshake (Ensures strict mapping) ──
 browser.runtime.onConnect.addListener((port) => {
   if (port.name !== "bug-panel") return;
-  ports.add(port);
-  port.onDisconnect.addListener(() => ports.delete(port));
+
+  port.onMessage.addListener((msg) => {
+    if (msg.type === "init_panel") {
+      const senderTabId = port && port.sender && port.sender.tab && port.sender.tab.id;
+      const tabId = (typeof senderTabId === 'number') ? senderTabId : Number(msg.tabId);
+      if (!Number.isInteger(tabId)) return;
+
+      for (const [k, v] of connectedPanels.entries()) {
+        if (v === port || k === tabId) connectedPanels.delete(k);
+      }
+      connectedPanels.set(tabId, port);
+      return;
+    }
+
+    // Perform a request inside the target tab so webRequest sees it with the correct tabId
+    if (msg.type === 'perform_request' && msg.tabId && msg.request) {
+      const tabId = Number(msg.tabId);
+      const req = msg.request;
+
+      console.log('Bug Extension: perform_request received', { tabId, url: req.url, method: req.method });
+
+      // Build safe code to run inside the tab to execute fetch
+      try {
+        const code = `(() => {
+          try {
+            const url = ${JSON.stringify(req.url)};
+            const method = ${JSON.stringify(req.method || 'GET')};
+            const headers = ${JSON.stringify(req.headers || {})};
+            const body = ${JSON.stringify(req.body || null)};
+            // Use fetch in page context
+            fetch(url, { method, headers, body, credentials: 'include' })
+              .then(r => r.text().then(t => { try { console.log('Bug Extension: performed request', method, url, r.status, t && t.length); } catch(e){} }))
+              .catch(e => { try { console.warn('Bug Extension: perform_request error', e); } catch(e){} });
+          } catch(e) { try { console.warn('Bug Extension: perform_request inner error', e); } catch(e){} }
+        })();`;
+
+        browser.tabs.executeScript(tabId, { code }).then(() => {
+          // Echo back to the panel that we sent the request (instant feedback)
+          try {
+            const p = connectedPanels.get(tabId);
+            if (p) p.postMessage({ type: 'sent_request', data: req });
+            console.log('Bug Extension: perform_request executed script for tab', tabId);
+          } catch (e) {
+            console.warn('Bug Extension: perform_request postMessage failed', e);
+          }
+        }).catch(err => {
+          console.warn('Bug Extension: executeScript failed for perform_request', err);
+          // notify panel of failure if possible
+          try {
+            const p = connectedPanels.get(tabId);
+            if (p) p.postMessage({ type: 'perform_request_error', error: String(err), data: req });
+          } catch (e) {}
+        });
+      } catch (e) {
+        console.warn('Bug Extension: failed to perform_request', e);
+      }
+      return;
+    }
+  });
+
+  port.onDisconnect.addListener(() => {
+    for (const [k, v] of connectedPanels.entries()) {
+      if (v === port) connectedPanels.delete(k);
+    }
+  });
 });
 
 // ── Message handling ──

@@ -4,6 +4,69 @@
 // request capture visualization, replaying, and endpoint hunting.
 // ============================================================
 
+
+// At the absolute top of your panel.js file
+const port = browser.runtime.connect({ name: "bug-panel" });
+
+function registerCurrentPanelTarget() {
+  if (browser.devtools && browser.devtools.inspectedWindow && typeof browser.devtools.inspectedWindow.tabId === 'number') {
+    port.postMessage({ type: "init_panel", tabId: browser.devtools.inspectedWindow.tabId });
+  }
+}
+
+// Send the active tab's ID immediately to register this exact window context
+registerCurrentPanelTarget();
+
+// Your existing panel message receiver:
+port.onMessage.addListener((msg) => {
+  if (msg.type === 'captured_request') {
+     // Render your network request securely here
+     console.log("Captured strictly from this tab:", msg.data);
+  }
+});
+
+// Also accept 'sent_request' echoes for immediate UI feedback
+port.onMessage.addListener((msg) => {
+  if (msg.type === 'sent_request') {
+    try {
+      const req = msg.data;
+      // Convert to captured-request shape so it appears in the main requests list
+      const ts = Date.now();
+      const captured = {
+        requestId: `sent-${ts}-${Math.floor(Math.random()*1000)}`,
+        url: req.url,
+        method: (req.method || 'GET').toUpperCase(),
+        type: 'fetch',
+        timeStamp: ts,
+        requestBody: req.body || null,
+        tabId: (browser.devtools && browser.devtools.inspectedWindow) ? browser.devtools.inspectedWindow.tabId : null,
+        initiator: window.location && window.location.origin ? window.location.origin : '',
+        requestHeaders: Object.keys(req.headers || {}).map(k => ({ name: k, value: req.headers[k] })),
+        statusCode: null
+      };
+
+      // Add to captured requests and refresh UI
+      capturedRequests.push(captured);
+      updateRequestCountBadge();
+      updateDomainFilters(captured.url);
+      updateExtensionFilters();
+      applyRequestFilters();
+
+      // Also write into the fuzz results console for immediate feedback
+      try {
+        const resultsConsole = document.getElementById('fuzz-results');
+        if (resultsConsole) {
+          const line = `<div style="color: var(--accent);">↳ Sent: <strong>${escapeHtml(captured.method)}</strong> ${escapeHtml(captured.url)}</div>`;
+          resultsConsole.innerHTML += line;
+          resultsConsole.scrollTop = resultsConsole.scrollHeight;
+        }
+      } catch (e) {}
+
+      console.log('Sent request (fuzz/replay):', captured);
+    } catch (e) {}
+  }
+});
+
 // ── Shared State ──
 let capturedRequests = [];
 let filteredRequests = [];
@@ -12,20 +75,15 @@ let isPaused = false;
 let activeTheme = 'dark';
 let activeEndpoints = [];
 
-// Connect to background script
-const port = browser.runtime.connect({ name: "bug-panel" });
-
 // ── DOM Initialization & Event Listeners ──
 document.addEventListener("DOMContentLoaded", () => {
   initTabs();
   initTheme();
   initRequestTab();
-  initEndpointsTab();
-  initToolsTab();
   initResizeHandle();
   initContextMenu();
 
-  // Load initial data
+  // Load initial endpoint data for inline findings
   loadEndpointsFromStorage();
 
   // Listen for storage changes to sync endpoints
@@ -45,6 +103,7 @@ port.onMessage.addListener((msg) => {
     capturedRequests.push(req);
     updateRequestCountBadge();
     updateDomainFilters(req.url);
+    updateExtensionFilters();
     applyRequestFilters();
   }
 });
@@ -107,6 +166,14 @@ function initRequestTab() {
   document.getElementById("req-status-filter").addEventListener("change", applyRequestFilters);
   document.getElementById("req-param-filter").addEventListener("change", applyRequestFilters);
   document.getElementById("req-domain-filter").addEventListener("change", applyRequestFilters);
+  document.getElementById("req-extension-filter").addEventListener("change", applyRequestFilters);
+
+  document.querySelectorAll("#req-finding-tags .tag-filter").forEach(btn => {
+    btn.addEventListener("click", () => {
+      btn.classList.toggle("active");
+      applyRequestFilters();
+    });
+  });
 
   const pauseBtn = document.getElementById("req-pause-btn");
   pauseBtn.addEventListener("click", () => {
@@ -195,7 +262,6 @@ function updateDomainFilters(urlStr) {
   try {
     const url = new URL(urlStr);
     const select = document.getElementById("req-domain-filter");
-    const epSelect = document.getElementById("ep-domain-filter");
 
     // Check if domain already exists in list
     let exists = false;
@@ -204,22 +270,113 @@ function updateDomainFilters(urlStr) {
     }
 
     if (!exists) {
-      const opt1 = new Option(url.hostname, url.origin);
-      const opt2 = new Option(url.hostname, url.origin);
-      select.add(opt1);
-      epSelect.add(opt2);
+      const opt = new Option(url.hostname, url.origin);
+      select.add(opt);
     }
   } catch (e) { }
 }
 
+function getRequestExtension(urlStr) {
+  try {
+    const pathname = new URL(urlStr).pathname;
+    const lastSlash = pathname.lastIndexOf('/');
+    const lastDot = pathname.lastIndexOf('.');
+    if (lastDot > lastSlash) {
+      return pathname.substring(lastDot).toLowerCase();
+    }
+  } catch (e) {}
+  return 'none';
+}
+
+function getSelectedFilterValues(select) {
+  if (!select) return [];
+  return Array.from(select.selectedOptions).map(option => option.value).filter(Boolean);
+}
+
+function isFilterSelectionAll(values) {
+  return values.length === 0 || values.includes('all');
+}
+
+function getEndpointMetadataForRequest(req) {
+  if (!req || !Array.isArray(activeEndpoints) || activeEndpoints.length === 0) return null;
+  try {
+    const reqUrl = new URL(req.url);
+    return activeEndpoints.find(ep => {
+      try {
+        const epUrl = new URL(ep.url);
+        return ep.method === req.method && reqUrl.origin === epUrl.origin && reqUrl.pathname === epUrl.pathname;
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return null;
+  }
+}
+
+function getRequestFindings(req) {
+  const endpoint = getEndpointMetadataForRequest(req);
+  if (!endpoint) return [];
+
+  const findings = [];
+  if (endpoint.sensitive) findings.push('sensitive');
+  if (endpoint.tags) {
+    Object.entries(endpoint.tags).forEach(([tag, value]) => {
+      if (value) findings.push(tag);
+    });
+  }
+  return findings;
+}
+
+function getRequestFindingBadges(req) {
+  const findings = getRequestFindings(req);
+  if (!findings.length) return '';
+
+  return `<span class="req-findings">${findings.map(tag => {
+    const label = tag === 'sensitive' ? 'Sensitive' : tag.toUpperCase();
+    return `<span class="req-finding-chip ${tag === 'sensitive' ? 'sensitive' : tag}">${escapeHtml(label)}</span>`;
+  }).join('')}</span>`;
+}
+
+function updateExtensionFilters() {
+  const select = document.getElementById("req-extension-filter");
+  if (!select) return;
+
+  const selectedValues = getSelectedFilterValues(select);
+  const extensions = new Set();
+
+  capturedRequests.forEach(req => {
+    const ext = getRequestExtension(req.url);
+    if (ext) extensions.add(ext);
+  });
+
+  select.innerHTML = '';
+  const allOption = new Option('All Extensions', 'all');
+  allOption.selected = selectedValues.includes('all') || selectedValues.length === 0;
+  select.add(allOption);
+
+  const sortedExtensions = Array.from(extensions).sort((a, b) => a.localeCompare(b));
+  sortedExtensions.forEach(ext => {
+    const option = new Option(ext === 'none' ? 'No Extension' : ext, ext);
+    option.selected = selectedValues.includes(ext);
+    select.add(option);
+  });
+}
+
 function applyRequestFilters() {
   const query = document.getElementById("req-search").value.toLowerCase();
-  const method = document.getElementById("req-method-filter").value;
-  const domain = document.getElementById("req-domain-filter").value;
+  const methodSelect = document.getElementById("req-method-filter");
+  const domainSelect = document.getElementById("req-domain-filter");
+  const extensionSelect = document.getElementById("req-extension-filter");
+  const statusSelect = document.getElementById("req-status-filter");
+  const paramSelect = document.getElementById("req-param-filter");
 
-  // Fetch value selections from our new filters
-  const statusFilter = document.getElementById("req-status-filter").value; // e.g., "all", "2xx", "4xx"
-  const paramFilter = document.getElementById("req-param-filter").value;   // e.g., "all", "has-params"
+  const selectedMethods = getSelectedFilterValues(methodSelect);
+  const selectedDomains = getSelectedFilterValues(domainSelect);
+  const selectedExtensions = getSelectedFilterValues(extensionSelect);
+  const selectedStatuses = getSelectedFilterValues(statusSelect);
+  const selectedParams = getSelectedFilterValues(paramSelect);
+  const selectedFindings = Array.from(document.querySelectorAll("#req-finding-tags .tag-filter.active")).map(btn => btn.getAttribute('data-tag'));
 
   filteredRequests = capturedRequests.filter(r => {
     // 1. Core Text/Query search mapping
@@ -228,31 +385,38 @@ function applyRequestFilters() {
       r.method.toLowerCase().includes(query);
 
     // 2. HTTP Method Filter
-    const matchesMethod = method === "all" || r.method === method;
+    let matchesMethod = true;
+    if (!isFilterSelectionAll(selectedMethods)) {
+      matchesMethod = selectedMethods.includes(r.method);
+    }
 
     // 3. Domain/Origin Filter
     let matchesDomain = true;
-    if (domain !== "all") {
-      try { matchesDomain = new URL(r.url).origin === domain; } catch { matchesDomain = false; }
+    if (!isFilterSelectionAll(selectedDomains)) {
+      try {
+        matchesDomain = selectedDomains.includes(new URL(r.url).origin);
+      } catch { matchesDomain = false; }
     }
 
     // 4. Status Code Range Evaluation
     let matchesStatus = true;
-    if (statusFilter !== "all") {
+    if (!isFilterSelectionAll(selectedStatuses)) {
       const statusCode = r.statusCode;
       if (!statusCode) {
         matchesStatus = false;
       } else {
-        const structuralRange = statusFilter[0]; // Gets '1', '2', '3', '4', or '5'
-        const rangeFloor = parseInt(structuralRange) * 100;
-        const rangeCeiling = rangeFloor + 99;
-        matchesStatus = statusCode >= rangeFloor && statusCode <= rangeCeiling;
+        matchesStatus = selectedStatuses.some(statusValue => {
+          const structuralRange = statusValue[0];
+          const rangeFloor = parseInt(structuralRange) * 100;
+          const rangeCeiling = rangeFloor + 99;
+          return statusCode >= rangeFloor && statusCode <= rangeCeiling;
+        });
       }
     }
 
     // 5. Parameter Presence Evaluation (Detects URL queries or POST/PUT bodies)
     let matchesParams = true;
-    if (paramFilter !== "all") {
+    if (!isFilterSelectionAll(selectedParams)) {
       let hasParameters = false;
 
       if (r.url.includes("?") && r.url.split("?")[1] !== "") {
@@ -262,10 +426,23 @@ function applyRequestFilters() {
         hasParameters = true;
       }
 
-      matchesParams = (paramFilter === "has-params") ? hasParameters : !hasParameters;
+      matchesParams = selectedParams.some(paramValue => (paramValue === 'has-params' && hasParameters) || (paramValue === 'no-params' && !hasParameters));
     }
 
-    return matchesQuery && matchesMethod && matchesDomain && matchesStatus && matchesParams;
+    // 6. Extension Filter
+    let matchesExtension = true;
+    if (!isFilterSelectionAll(selectedExtensions)) {
+      matchesExtension = selectedExtensions.includes(getRequestExtension(r.url));
+    }
+
+    // 7. Endpoint Findings Filter
+    let matchesFindings = true;
+    if (selectedFindings.length > 0) {
+      const findings = getRequestFindings(r);
+      matchesFindings = selectedFindings.some(f => findings.includes(f));
+    }
+
+    return matchesQuery && matchesMethod && matchesDomain && matchesStatus && matchesParams && matchesExtension && matchesFindings;
   });
 
   renderRequestList();
@@ -285,7 +462,8 @@ function renderRequestList() {
   container.innerHTML = "";
   filteredRequests.forEach(req => {
     const item = document.createElement("div");
-    item.className = `req-item ${selectedRequest && selectedRequest.requestId === req.requestId ? 'selected' : ''}`;
+    const findingChips = getRequestFindings(req);
+    item.className = `req-item ${selectedRequest && selectedRequest.requestId === req.requestId ? 'selected' : ''} ${findingChips.length ? 'has-findings' : ''}`;
 
     let statusClass = "s2xx";
     if (req.statusCode >= 300 && req.statusCode < 400) statusClass = "s3xx";
@@ -295,6 +473,7 @@ function renderRequestList() {
     item.innerHTML = `
       <span class="req-method ${req.method}">${req.method}</span>
       <span class="req-url" title="${escapeHtml(req.url)}">${escapeHtml(req.url)}</span>
+      ${getRequestFindingBadges(req)}
       <span class="req-status ${statusClass}">${req.statusCode || '---'}</span>
       <span class="req-type">${escapeHtml(req.type || '')}</span>
     `;
@@ -363,6 +542,7 @@ function clearRequests() {
   filteredRequests = [];
   selectedRequest = null;
   updateRequestCountBadge();
+  updateExtensionFilters();
   applyRequestFilters();
 
   document.getElementById("request-display").textContent = "Select a request from the list";
@@ -401,24 +581,24 @@ function executeReplay() {
     options.body = body;
   }
 
-  fetch(url, options)
-    .then(async response => {
-      const statusText = `Status: ${response.status} ${response.statusText}`;
-      let statusClass = response.ok ? "s2xx" : "s4xx";
-      metaDisplay.innerHTML = `<span class="meta-badge ${statusClass}">${statusText}</span>`;
-
-      let headerStr = "";
-      for (let [key, value] of response.headers.entries()) {
-        headerStr += `${key}: ${value}\n`;
-      }
-
-      const text = await response.text();
-      respDisplay.textContent = `${headerStr}\n${text}`;
-    })
-    .catch(err => {
+  // Ask background to perform this request in the inspected tab so it is intercepted by webRequest
+  try {
+    const req = { method: options.method || 'GET', url, headers: options.headers || {}, body: options.body || null };
+    // Log to results console for visibility
+    respDisplay.textContent = "Sending request via background...";
+    metaDisplay.innerHTML = `<span class="meta-badge s2xx">SENDING</span>`;
+    try {
+      console.log('Panel: requesting background to perform request', req);
+      port.postMessage({ type: 'perform_request', tabId: (browser.devtools && browser.devtools.inspectedWindow) ? browser.devtools.inspectedWindow.tabId : undefined, request: req });
+    } catch (e) {
+      console.warn('Panel: perform_request postMessage failed', e);
+      respDisplay.textContent = `Replay Failed: ${e.message}`;
       metaDisplay.innerHTML = `<span class="meta-badge s4xx">Error</span>`;
-      respDisplay.textContent = `Replay Failed: ${err.message}`;
-    });
+    }
+  } catch (e) {
+    metaDisplay.innerHTML = `<span class="meta-badge s4xx">Error</span>`;
+    respDisplay.textContent = `Replay Failed: ${e.message}`;
+  }
 }
 
 // ── Active fuzzing ──// ============================================================================
@@ -501,7 +681,7 @@ function renderFuzzerParameterMatrixRows() {
   if (!container) return;
 
   if (currentFuzzParameters.length === 0) {
-    container.innerHTML = `<div class="empty-hint" style="text-align: center; margin-top: 20px;">No variables identified. Click "+ Add Param" to add custom rows.</div>`;
+    container.innerHTML = `<div class="empty-hint" style="text-align: center; margin-top: 20px;">No targets identified. Click "+ Add Target" to add custom rows.</div>`;
     return;
   }
 
@@ -512,22 +692,33 @@ function renderFuzzerParameterMatrixRows() {
 
     const checkedAttr = param.active ? 'checked' : '';
     const rowOpacity = param.active ? '1' : '0.6';
+    const isUrlTarget = param.type === 'url' || param.type === 'path';
 
     row.innerHTML = `
-      <input type="checkbox" id="fuzz-chk-${index}" ${checkedAttr} style="margin: 0; cursor: pointer;" title="Check to fuzz this parameter">
-      <span style="font-size: 9px; padding: 1px 4px; border-radius: 4px; background: var(--bg4); font-family: var(--mono); color: var(--text2); min-width: 50px; text-align: center;">${param.type}</span>
-      <input type="text" value="${escapeHtml(param.key)}" id="fuzz-key-${index}" style="flex: 0.8; height: 18px; font-size: 11px; background: var(--bg); border: 1px solid var(--border); color: var(--accent); padding: 0 4px; border-radius: 4px; font-family: var(--mono); margin: 0;">
-      <input type="text" value="${escapeHtml(param.value)}" id="fuzz-val-${index}" style="flex: 1.2; height: 18px; font-size: 11px; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 0 4px; border-radius: 4px; font-family: var(--mono); margin: 0; opacity: ${rowOpacity};">
-      <select id="fuzz-dict-${index}" style="flex: 1.4; height: 20px; font-size: 10px; background: var(--bg); border: 1px solid ${param.active && param.dictionary ? 'var(--accent2)' : 'var(--border)'}; color: var(--text); padding: 0 2px; border-radius: 4px; font-family: sans-serif; margin: 0; cursor: pointer;" ${!param.active ? 'disabled' : ''} title="Attack dictionary for this parameter">
+      <input type="checkbox" id="fuzz-chk-${index}" ${checkedAttr} style="margin: 0; cursor: pointer;" title="Check to fuzz this target">
+      <select id="fuzz-type-${index}" style="font-size: 9px; padding: 1px 4px; border-radius: 4px; background: var(--bg4); font-family: var(--mono); color: var(--text2); min-width: 56px; text-align: center;" title="Target type">
+        <option value="query" ${param.type === 'query' ? 'selected' : ''}>query</option>
+        <option value="body-form" ${param.type === 'body-form' ? 'selected' : ''}>body-form</option>
+        <option value="body-json" ${param.type === 'body-json' ? 'selected' : ''}>body-json</option>
+        <option value="url" ${isUrlTarget ? 'selected' : ''}>url</option>
+        <option value="path" ${param.type === 'path' ? 'selected' : ''}>path</option>
+      </select>
+      <input type="text" value="${escapeHtml(param.key)}" id="fuzz-key-${index}" style="flex: 0.8; height: 18px; font-size: 11px; background: var(--bg); border: 1px solid var(--border); color: var(--accent); padding: 0 4px; border-radius: 4px; font-family: var(--mono); margin: 0;" placeholder="name or label">
+      <input type="text" value="${escapeHtml(param.value)}" id="fuzz-val-${index}" style="flex: 1.2; height: 18px; font-size: 11px; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 0 4px; border-radius: 4px; font-family: var(--mono); margin: 0; opacity: ${rowOpacity};" placeholder="${isUrlTarget ? 'URL/path value' : 'original value'}">
+      <select id="fuzz-dict-${index}" style="flex: 1.4; height: 20px; font-size: 10px; background: var(--bg); border: 1px solid ${param.active && param.dictionary ? 'var(--accent2)' : 'var(--border)'}; color: var(--text); padding: 0 2px; border-radius: 4px; font-family: sans-serif; margin: 0; cursor: pointer;" ${!param.active ? 'disabled' : ''} title="Attack dictionary for this target">
         ${buildDictionaryOptionsHtml(param.dictionary)}
       </select>
-      <button class="tool-btn" id="fuzz-del-${index}" style="height: 18px; padding: 0 4px; font-size: 10px; color: var(--danger); background: transparent; border: none; margin: 0; cursor: pointer;" title="Remove parameter">✕</button>
+      <button class="tool-btn" id="fuzz-del-${index}" style="height: 18px; padding: 0 4px; font-size: 10px; color: var(--danger); background: transparent; border: none; margin: 0; cursor: pointer;" title="Remove target">✕</button>
     `;
 
     // Checkbox toggles fuzz state
     row.querySelector(`#fuzz-chk-${index}`).addEventListener("change", (e) => {
       param.active = e.target.checked;
       renderFuzzerParameterMatrixRows(); // Re-render to update visual state
+    });
+    row.querySelector(`#fuzz-type-${index}`).addEventListener("change", (e) => {
+      param.type = e.target.value;
+      renderFuzzerParameterMatrixRows();
     });
     row.querySelector(`#fuzz-key-${index}`).addEventListener("input", (e) => { param.key = e.target.value; });
     row.querySelector(`#fuzz-val-${index}`).addEventListener("input", (e) => { param.value = e.target.value; });
@@ -544,6 +735,19 @@ function renderFuzzerParameterMatrixRows() {
 function addNewBlankParameterRow() {
   currentFuzzParameters.push({ type: 'query', key: 'param_name', value: 'test_value', active: false, dictionary: '' });
   renderFuzzerParameterMatrixRows();
+}
+
+function buildFuzzedUrl(baseUrl, runtimeValue) {
+  try {
+    return new URL(runtimeValue, baseUrl).toString();
+  } catch (e) {
+    return runtimeValue || baseUrl;
+  }
+}
+
+function appendQueryString(url, queryString) {
+  if (!queryString) return url;
+  return url.includes('?') ? `${url}&${queryString}` : `${url}?${queryString}`;
 }
 
 /**
@@ -583,7 +787,8 @@ async function executeAttackMatrixPipeline() {
     const payloads = NucleiFuzzDictionaries[fuzzTarget.dictionary];
     if (!payloads || payloads.length === 0) continue;
 
-    resultsConsole.innerHTML += `<div style="color: var(--accent); border-bottom: 1px solid var(--border); padding: 4px 0; margin-bottom: 4px; font-weight: bold;">🎯 Fuzzing param: <code>${escapeHtml(fuzzTarget.key)}</code> with <strong>${fuzzTarget.dictionary}</strong> (${payloads.length} payloads)</div>`;
+    const targetLabel = (fuzzTarget.type === 'url' || fuzzTarget.type === 'path') ? 'URL target' : 'param';
+    resultsConsole.innerHTML += `<div style="color: var(--accent); border-bottom: 1px solid var(--border); padding: 4px 0; margin-bottom: 4px; font-weight: bold;">🎯 Fuzzing ${targetLabel}: <code>${escapeHtml(fuzzTarget.key || fuzzTarget.type)}</code> with <strong>${fuzzTarget.dictionary}</strong> (${payloads.length} payloads)</div>`;
 
     for (const rawPayload of payloads) {
       const currentPayload = rawPayload.replace(/{{marker}}/g, oastDomain);
@@ -593,12 +798,16 @@ async function executeAttackMatrixPipeline() {
       let jsonBodyObj = {};
       let hasBody = false;
       let bodyType = 'form';
+      let executionUrl = baseUrl;
+      let fetchOptions = { method: 'GET', cache: 'no-store' };
 
       currentFuzzParameters.forEach(p => {
         // Use payload for the current fuzz target, original value for everything else
         const runtimeValue = (p === fuzzTarget) ? currentPayload : p.value;
 
-        if (p.type === 'query') {
+        if (p.type === 'url' || p.type === 'path') {
+          executionUrl = buildFuzzedUrl(baseUrl, runtimeValue);
+        } else if (p.type === 'query') {
           queryBuilder.append(p.key, runtimeValue);
         } else if (p.type === 'body-form') {
           formBodyBuilder.append(p.key, runtimeValue);
@@ -612,8 +821,7 @@ async function executeAttackMatrixPipeline() {
       });
 
       let finalQueryStr = queryBuilder.toString();
-      let executionUrl = baseUrl + (finalQueryStr ? '?' + finalQueryStr : '');
-      let fetchOptions = { method: 'GET', cache: 'no-store' };
+      executionUrl = appendQueryString(executionUrl, finalQueryStr);
 
       if (hasBody && bodyType === 'form' && formBodyBuilder.toString()) {
         fetchOptions.method = 'POST';
@@ -626,20 +834,22 @@ async function executeAttackMatrixPipeline() {
       }
 
       try {
-        const startClock = performance.now();
-        const response = await fetch(executionUrl, fetchOptions);
-        const latency = Math.round(performance.now() - startClock);
-        const responseBody = await response.text();
+        // Build request object and ask background to execute it inside the inspected tab
+        const req = {
+          method: (fetchOptions.method || 'GET').toUpperCase(),
+          url: executionUrl,
+          headers: fetchOptions.headers || {},
+          body: fetchOptions.body || null
+        };
 
-        let statusBadgeClass = "s2xx";
-        if (response.status >= 300 && response.status < 400) statusBadgeClass = "s3xx";
-        if (response.status >= 400 && response.status < 500) statusBadgeClass = "s4xx";
-        if (response.status >= 500) statusBadgeClass = "s5xx";
+        // Send to background to perform in-tab (so webRequest captures it)
+        try { port.postMessage({ type: 'perform_request', tabId: (browser.devtools && browser.devtools.inspectedWindow) ? browser.devtools.inspectedWindow.tabId : undefined, request: req }); } catch (e) { console.warn('Fuzzer: failed to request background perform_request', e); }
 
+        // Immediate feedback in results console — webRequest will also report captures separately
         resultsConsole.innerHTML += `
           <div style="margin-bottom: 4px; padding-bottom: 2px; border-bottom: 1px dashed var(--border);">
             <span style="color: var(--text3); font-size: 10px;">[${escapeHtml(fuzzTarget.key)}]</span> Payload: <code style="color: var(--accent2); font-weight: bold;">${escapeHtml(currentPayload)}</code><br>
-            ↳ <span class="meta-badge ${statusBadgeClass}">HTTP ${response.status}</span> | Length: <strong>${responseBody.length}b</strong> | Latency: <strong>${latency}ms</strong>
+            ↳ <span class="meta-badge s2xx">SENT</span> <code style="color: var(--accent);">${escapeHtml(req.method)}</code> ${escapeHtml(req.url)}
           </div>`;
       } catch (networkErr) {
         resultsConsole.innerHTML += `<div style="color: var(--danger); margin-bottom: 4px;">❌ Drop [${escapeHtml(fuzzTarget.key)}=${escapeHtml(currentPayload)}]: ${escapeHtml(networkErr.message)}</div>`;
@@ -727,7 +937,7 @@ function initEndpointsTab() {
 function loadEndpointsFromStorage() {
   browser.storage.local.get(['endpoints']).then(data => {
     activeEndpoints = data.endpoints || [];
-    renderEndpointsList();
+    applyRequestFilters();
   });
 }
 
@@ -826,7 +1036,7 @@ function renderEndpointsList() {
 function clearEndpoints() {
   browser.runtime.sendMessage({ action: "clear-endpoints" });
   activeEndpoints = [];
-  renderEndpointsList();
+  applyRequestFilters();
 }
 
 // ── Auxiliary Security Utilities/Tools ──
