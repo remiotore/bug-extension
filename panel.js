@@ -74,6 +74,7 @@ let selectedRequest = null;
 let isPaused = false;
 let activeTheme = 'dark';
 let activeEndpoints = [];
+let interceptEnabled = false;
 
 // ── DOM Initialization & Event Listeners ──
 document.addEventListener("DOMContentLoaded", () => {
@@ -242,9 +243,11 @@ function initRequestTab() {
   // Fuzzing: Wire up the interactive fuzzer component controls safely
   const addParamBtn = document.getElementById("fuzz-add-param-btn");
   const startFuzzBtn = document.getElementById("fuzz-start-btn");
+  const toggleInterceptBtn = document.getElementById("toggle-intercept-btn");
 
   if (addParamBtn) addParamBtn.addEventListener("click", addNewBlankParameterRow);
   if (startFuzzBtn) startFuzzBtn.addEventListener("click", executeAttackMatrixPipeline);
+  if (toggleInterceptBtn) toggleInterceptBtn.addEventListener("click", toggleInterceptMode);
 
   // Wayback Check Button
   document.getElementById("wayback-check-btn").addEventListener("click", checkWayback);
@@ -560,11 +563,11 @@ function executeReplay() {
   const url = document.getElementById("replay-url").value;
   const headersRaw = document.getElementById("replay-headers").value;
   const body = document.getElementById("replay-body").value;
-  const respDisplay = document.getElementById("replay-response");
-  const metaDisplay = document.getElementById("replay-response-meta");
+  const resultsConsole = document.getElementById("fuzz-results");
 
-  respDisplay.textContent = "Sending request...";
-  metaDisplay.innerHTML = "";
+  if (!url) {
+    return alert('Please enter a request URL before replaying.');
+  }
 
   const headers = {};
   headersRaw.split("\n").forEach(line => {
@@ -581,23 +584,56 @@ function executeReplay() {
     options.body = body;
   }
 
-  // Ask background to perform this request in the inspected tab so it is intercepted by webRequest
+  if (resultsConsole) {
+    resultsConsole.innerHTML += `<div style="color: var(--accent);">↳ Sending request: <strong>${escapeHtml(method)}</strong> ${escapeHtml(url)}</div>`;
+    resultsConsole.scrollTop = resultsConsole.scrollHeight;
+  }
+
   try {
     const req = { method: options.method || 'GET', url, headers: options.headers || {}, body: options.body || null };
-    // Log to results console for visibility
-    respDisplay.textContent = "Sending request via background...";
-    metaDisplay.innerHTML = `<span class="meta-badge s2xx">SENDING</span>`;
     try {
       console.log('Panel: requesting background to perform request', req);
       port.postMessage({ type: 'perform_request', tabId: (browser.devtools && browser.devtools.inspectedWindow) ? browser.devtools.inspectedWindow.tabId : undefined, request: req });
     } catch (e) {
       console.warn('Panel: perform_request postMessage failed', e);
-      respDisplay.textContent = `Replay Failed: ${e.message}`;
-      metaDisplay.innerHTML = `<span class="meta-badge s4xx">Error</span>`;
+      if (resultsConsole) {
+        resultsConsole.innerHTML += `<div style="color: var(--danger);">Replay Failed: ${escapeHtml(e.message)}</div>`;
+        resultsConsole.scrollTop = resultsConsole.scrollHeight;
+      }
     }
   } catch (e) {
-    metaDisplay.innerHTML = `<span class="meta-badge s4xx">Error</span>`;
-    respDisplay.textContent = `Replay Failed: ${e.message}`;
+    if (resultsConsole) {
+      resultsConsole.innerHTML += `<div style="color: var(--danger);">Replay Failed: ${escapeHtml(e.message)}</div>`;
+      resultsConsole.scrollTop = resultsConsole.scrollHeight;
+    }
+  }
+}
+
+function toggleInterceptMode() {
+  interceptEnabled = !interceptEnabled;
+  const btn = document.getElementById("toggle-intercept-btn");
+  if (btn) {
+    btn.textContent = interceptEnabled ? "Intercept ON" : "Intercept OFF";
+    btn.classList.toggle("active", interceptEnabled);
+  }
+  sendInterceptConfig();
+}
+
+
+function getCurrentTabId() {
+  if (browser.devtools && browser.devtools.inspectedWindow && typeof browser.devtools.inspectedWindow.tabId === 'number') {
+    return browser.devtools.inspectedWindow.tabId;
+  }
+  return null;
+}
+
+function sendInterceptConfig() {
+  try {
+    const tabId = getCurrentTabId();
+    console.log('Panel: sending intercept config', { tabId, enabled: interceptEnabled });
+    port.postMessage({ type: 'set_intercept', tabId, enabled: interceptEnabled });
+  } catch (e) {
+    console.warn('Panel: failed to send intercept config', e);
   }
 }
 
@@ -643,12 +679,27 @@ function setupFuzzerTabFromSelectedRequest(req) {
   document.getElementById("fuzz-url").value = baseSplit[0];
   currentFuzzParameters = [];
 
-  // Parse URL queries (?id=1&user=admin) – default unchecked (not fuzz)
+  // Parse URL queries (?id=1&user=admin)
   if (baseSplit.length > 1) {
     let searchParams = new URLSearchParams(baseSplit[1]);
     for (let [key, value] of searchParams.entries()) {
-      currentFuzzParameters.push({ type: 'query', key: key, value: value, active: false, dictionary: '' });
+      currentFuzzParameters.push({ type: 'query', key: key, value: value, active: true, dictionary: '' });
     }
+  }
+
+  // Parse path-style params (/id=test or /user=alice)
+  try {
+    const pathSegments = new URL(baseSplit[0]).pathname.split('/');
+    pathSegments.forEach(segment => {
+      if (!segment || !segment.includes('=')) return;
+      const [key, ...rest] = segment.split('=');
+      const value = rest.join('=');
+      if (key && value !== undefined) {
+        currentFuzzParameters.push({ type: 'path', key: key, value: value, active: true, dictionary: '' });
+      }
+    });
+  } catch (e) {
+    // ignore bad URL parsing
   }
 
   // Parse body properties based on Content-Type structures
@@ -658,13 +709,13 @@ function setupFuzzerTabFromSelectedRequest(req) {
       try {
         let json = JSON.parse(bodyStr);
         for (let [key, value] of Object.entries(json)) {
-          currentFuzzParameters.push({ type: 'body-json', key: key, value: String(value), active: false, dictionary: '' });
+          currentFuzzParameters.push({ type: 'body-json', key: key, value: String(value), active: true, dictionary: '' });
         }
       } catch (e) { }
     } else {
       let bodyParams = new URLSearchParams(bodyStr);
       for (let [key, value] of bodyParams.entries()) {
-        currentFuzzParameters.push({ type: 'body-form', key: key, value: value, active: false, dictionary: '' });
+        currentFuzzParameters.push({ type: 'body-form', key: key, value: value, active: true, dictionary: '' });
       }
     }
   }
@@ -745,6 +796,24 @@ function buildFuzzedUrl(baseUrl, runtimeValue) {
   }
 }
 
+function replacePathParamValue(url, key, newValue) {
+  try {
+    const u = new URL(url);
+    const segments = u.pathname.split('/').map(segment => {
+      if (!segment || !segment.includes('=')) return segment;
+      const [paramName, ...rest] = segment.split('=');
+      if (paramName === key && rest.length > 0) {
+        return `${paramName}=${newValue}`;
+      }
+      return segment;
+    });
+    u.pathname = segments.join('/');
+    return u.toString();
+  } catch (e) {
+    return url;
+  }
+}
+
 function appendQueryString(url, queryString) {
   if (!queryString) return url;
   return url.includes('?') ? `${url}&${queryString}` : `${url}?${queryString}`;
@@ -762,6 +831,12 @@ async function executeAttackMatrixPipeline() {
 
   if (!baseUrl) {
     alert("Please provide a Base Target URL destination path.");
+    return;
+  }
+
+  const dictionaries = (typeof NucleiFuzzDictionaries === 'object' && NucleiFuzzDictionaries) ? NucleiFuzzDictionaries : (window.NucleiFuzzDictionaries || null);
+  if (!dictionaries) {
+    alert('Fuzzing dictionaries failed to load. Please ensure payloads.js is available.');
     return;
   }
 
@@ -784,8 +859,11 @@ async function executeAttackMatrixPipeline() {
 
   // For each active parameter, iterate its dictionary payloads
   for (const fuzzTarget of targetParameters) {
-    const payloads = NucleiFuzzDictionaries[fuzzTarget.dictionary];
-    if (!payloads || payloads.length === 0) continue;
+    const payloads = dictionaries[fuzzTarget.dictionary];
+    if (!payloads || payloads.length === 0) {
+      resultsConsole.innerHTML += `<div style="color: var(--danger);">No payloads found for dictionary: ${escapeHtml(String(fuzzTarget.dictionary))}</div>`;
+      continue;
+    }
 
     const targetLabel = (fuzzTarget.type === 'url' || fuzzTarget.type === 'path') ? 'URL target' : 'param';
     resultsConsole.innerHTML += `<div style="color: var(--accent); border-bottom: 1px solid var(--border); padding: 4px 0; margin-bottom: 4px; font-weight: bold;">🎯 Fuzzing ${targetLabel}: <code>${escapeHtml(fuzzTarget.key || fuzzTarget.type)}</code> with <strong>${fuzzTarget.dictionary}</strong> (${payloads.length} payloads)</div>`;
@@ -802,11 +880,12 @@ async function executeAttackMatrixPipeline() {
       let fetchOptions = { method: 'GET', cache: 'no-store' };
 
       currentFuzzParameters.forEach(p => {
-        // Use payload for the current fuzz target, original value for everything else
         const runtimeValue = (p === fuzzTarget) ? currentPayload : p.value;
 
-        if (p.type === 'url' || p.type === 'path') {
+        if (p.type === 'url') {
           executionUrl = buildFuzzedUrl(baseUrl, runtimeValue);
+        } else if (p.type === 'path') {
+          executionUrl = replacePathParamValue(executionUrl, p.key, runtimeValue);
         } else if (p.type === 'query') {
           queryBuilder.append(p.key, runtimeValue);
         } else if (p.type === 'body-form') {
@@ -1010,9 +1089,10 @@ function renderEndpointsList() {
     // Clicking an endpoint seeds the Replay system
     item.addEventListener("click", () => {
       document.getElementById("tab-btn-requests").click();
-      document.querySelector('[data-detail="replay"]').click();
+      document.querySelector('[data-detail="attack"]').click();
       document.getElementById("replay-method").value = ep.method;
       document.getElementById("replay-url").value = ep.url;
+      document.getElementById("fuzz-url").value = ep.url;
       document.getElementById("replay-body").value = "";
 
       let headerStr = "";

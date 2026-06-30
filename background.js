@@ -5,6 +5,7 @@
 
 const connectedPanels = new Map(); // Track active devtools tabs: tabId -> port
 const requestMap = new Map();
+const interceptState = new Map();
 
 // ── Endpoint Hunter state ──
 let endpoints = new Map();
@@ -38,6 +39,15 @@ function isInteresting(details) {
   if (urlLower.includes('.css') && type !== 'xmlhttprequest') return false;
   if (urlLower.includes('.js') && (type === 'xmlhttprequest' || urlLower.includes('config') || urlLower.includes('api') || urlLower.includes('admin'))) return true;
   if (urlLower.includes('/api/') || urlLower.includes('/graphql') || urlLower.includes('/rest/')) return true;
+  if (urlLower.includes('?')) return true;
+
+  try {
+    const parsed = new URL(details.url);
+    if (parsed.pathname.split('/').some(segment => segment.includes('=') && !segment.startsWith('='))) {
+      return true;
+    }
+  } catch (e) {}
+
   return false;
 }
 
@@ -141,6 +151,11 @@ function handleBeforeRequest(details) {
 
   if (!connectedPanels.has(details.tabId)) return;
 
+  const intercept = interceptState.get(details.tabId);
+  if (intercept && intercept.enabled) {
+    console.log('Bug Extension: intercept active for tab', details.tabId, details.url);
+  }
+
   requestMap.set(details.requestId, {
     requestId: details.requestId,
     url: details.url,
@@ -156,6 +171,12 @@ function handleBeforeRequest(details) {
 // ── 2. HEADERS LISTENER ──
 function handleBeforeSendHeaders(details) {
   if (!connectedPanels.has(details.tabId)) return;
+
+  const intercept = interceptState.get(details.tabId);
+  let modifiedHeaders = details.requestHeaders ? details.requestHeaders.slice() : [];
+  if (intercept && intercept.enabled) {
+    return { requestHeaders: modifiedHeaders };
+  }
 
   const req = requestMap.get(details.requestId);
   if (req) {
@@ -208,6 +229,19 @@ function handleCompleted(details) {
     currentParamValues[k] = v;
   });
 
+  // Also detect path parameters of the form /key=value when query strings are absent.
+  url.pathname.split('/').forEach(segment => {
+    if (!segment || !segment.includes('=')) return;
+    const [keyPart, ...rest] = segment.split('=');
+    const valuePart = rest.join('=');
+    if (keyPart && valuePart !== undefined) {
+      allParams.add(keyPart);
+      if (!currentParamValues[keyPart]) {
+        currentParamValues[keyPart] = valuePart;
+      }
+    }
+  });
+
   if (!endpoints.has(key)) {
     const params = Array.from(allParams);
     const sensitive = isSensitiveEndpoint(url, details.method, params);
@@ -244,8 +278,8 @@ function handleErrorOccurred(details) {
 
 
 // Register listeners
-browser.webRequest.onBeforeRequest.addListener(handleBeforeRequest, { urls: ["<all_urls>"] }, ["requestBody"]);
-browser.webRequest.onBeforeSendHeaders.addListener(handleBeforeSendHeaders, { urls: ["<all_urls>"] }, ["requestHeaders"]);
+browser.webRequest.onBeforeRequest.addListener(handleBeforeRequest, { urls: ["<all_urls>"] }, ["requestBody", "blocking"]);
+browser.webRequest.onBeforeSendHeaders.addListener(handleBeforeSendHeaders, { urls: ["<all_urls>"] }, ["requestHeaders", "blocking"]);
 browser.webRequest.onCompleted.addListener(handleCompleted, { urls: ["<all_urls>"] }, ["responseHeaders"]);
 browser.webRequest.onErrorOccurred.addListener(handleErrorOccurred, { urls: ["<all_urls>"] });
 
@@ -263,6 +297,23 @@ browser.runtime.onConnect.addListener((port) => {
         if (v === port || k === tabId) connectedPanels.delete(k);
       }
       connectedPanels.set(tabId, port);
+      return;
+    }
+
+    if (msg.type === 'set_intercept') {
+      const senderTabId = port && port.sender && port.sender.tab && port.sender.tab.id;
+      let tabId = Number.isInteger(Number(msg.tabId)) ? Number(msg.tabId) : (typeof senderTabId === 'number' ? senderTabId : null);
+      if (!tabId) {
+        const matched = Array.from(connectedPanels.entries()).find(([id, panelPort]) => panelPort === port);
+        tabId = matched ? matched[0] : null;
+      }
+      if (tabId) {
+        interceptState.set(tabId, {
+          enabled: Boolean(msg.enabled),
+          rule: msg.rule || null
+        });
+        console.log('Bug Extension: intercept config updated', { tabId, intercept: interceptState.get(tabId) });
+      }
       return;
     }
 

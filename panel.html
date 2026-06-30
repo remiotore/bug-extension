@@ -92,14 +92,14 @@
           <div class="detail-tabs">
             <button class="detail-tab active" data-detail="request">Request</button>
             <button class="detail-tab" data-detail="response">Response</button>
-            <button class="detail-tab" data-detail="replay">Replay</button>
-            <button class="detail-tab" data-detail="fuzzer">Fuzzer</button>
+            <button class="detail-tab" data-detail="attack">Attack</button>
             <button class="detail-tab" data-detail="wayback">Wayback</button>
           </div>
           <div class="detail-actions">
             <button id="copy-curl-btn" class="small-btn" title="Copy as cURL" disabled>cURL</button>
             <button id="copy-python-btn" class="small-btn" title="Copy as Python" disabled>Python</button>
             <button id="copy-fetch-btn" class="small-btn" title="Copy as fetch()" disabled>Fetch</button>
+            <button id="toggle-intercept-btn" class="small-btn" title="Toggle live intercept">Intercept OFF</button>
           </div>
         </div>
 
@@ -112,71 +112,62 @@
           <pre id="response-display" class="code-display">Select a request to see its response</pre>
         </div>
 
-        <div id="detail-replay" class="detail-content">
-          <div class="replay-toolbar">
-            <select id="replay-method" class="filter-select">
-              <option>GET</option>
-              <option>POST</option>
-              <option>PUT</option>
-              <option>DELETE</option>
-              <option>PATCH</option>
-              <option>HEAD</option>
-              <option>OPTIONS</option>
-            </select>
-            <input type="text" id="replay-url" class="search-input" placeholder="URL" style="flex:1">
-            <button id="replay-send-btn" class="primary-btn">Send</button>
-          </div>
-          <div class="replay-sections">
-            <div class="replay-section">
-              <label>Headers (one per line: Name: Value)</label>
-              <textarea id="replay-headers" class="code-editor" rows="6"
-                placeholder="Content-Type: application/json&#10;Authorization: Bearer xxx"></textarea>
-            </div>
-            <div class="replay-section">
-              <label>Body</label>
-              <textarea id="replay-body" class="code-editor" rows="8"
-                placeholder="Request body (JSON, form data, etc.)"></textarea>
-            </div>
-            <div class="replay-section">
-              <label>Response</label>
-              <div id="replay-response-meta" class="response-meta"></div>
-              <pre id="replay-response" class="code-display">Send a request to see the response</pre>
-            </div>
-          </div>
-        </div>
-
-        <div id="detail-fuzzer" class="detail-content detail-fuzzer-layout">
-
-          <div
-            style="background: var(--bg2); padding: 8px; border-radius: var(--radius); border: 1px solid var(--border);">
-            <div style="display: flex; gap: 8px; align-items: center;">
-              <span
-                style="font-family: var(--mono); font-size: 11px; color: var(--accent); font-weight: bold; min-width: 60px;">BASE
-                URL:</span>
-              <input type="text" id="fuzz-url" class="tool-input-single"
-                style="flex: 1; height: 26px; font-size: 11px; font-family: var(--mono); background: var(--bg3); margin: 0; padding: 4px 8px; border: 1px solid var(--border); color: var(--text); border-radius: var(--radius);"
-                placeholder="Select a request from history...">
+        <div id="detail-attack" class="detail-content detail-fuzzer-layout">
+          <div style="background: var(--bg2); padding: 8px; border-radius: var(--radius); border: 1px solid var(--border); margin-bottom: 10px;">
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+              <span style="font-family: var(--mono); font-size: 11px; color: var(--accent); font-weight: bold; min-width: 60px;">BASE URL:</span>
+              <input type="text" id="fuzz-url" class="tool-input-single" style="flex: 1; height: 26px; font-size: 11px; font-family: var(--mono); background: var(--bg3); margin: 0; padding: 4px 8px; border: 1px solid var(--border); color: var(--text); border-radius: var(--radius);" placeholder="Select a request from history...">
               <span style="font-size: 9px; color: var(--text3); font-weight: bold; white-space: nowrap;">OAST:</span>
-              <input type="text" id="fuzz-oast-domain" value="interact.sh"
-                style="width: 120px; height: 26px; font-size: 11px; background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 0 6px; border-radius: var(--radius); box-sizing: border-box; font-family: var(--mono); margin: 0;">
-              <button id="fuzz-start-btn" class="tool-btn primary"
-                style="height: 26px; padding: 0 12px; font-size: 11px; font-weight: bold; white-space: nowrap; margin: 0;">🚀
-                Fire Attack</button>
+              <input type="text" id="fuzz-oast-domain" value="interact.sh" style="width: 120px; height: 26px; font-size: 11px; background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 0 6px; border-radius: var(--radius); box-sizing: border-box; font-family: var(--mono); margin: 0;">
+            </div>
+          </div>
+          <div style="margin-bottom: 10px;">
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+              <div style="flex: 1; min-width: 220px;">
+                <label>Request URL</label>
+                <input id="replay-url" type="text" class="tool-input-single" style="width: 100%; height: 26px; font-size: 11px; background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 4px 8px; border-radius: var(--radius); font-family: var(--mono);" placeholder="Request URL for replay or attack">
+              </div>
             </div>
           </div>
 
-          <div
-            style="flex: 1; display: flex; flex-direction: column; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; box-sizing: border-box; overflow: hidden;">
-            <div
-              style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 4px; margin-bottom: 6px;">
-              <span style="font-size: 10px; font-weight: bold; color: var(--text2); text-transform: uppercase;">🎯
-                Targets Setup</span>
-              <button id="fuzz-add-param-btn" class="tool-btn"
-                style="height: 18px; padding: 0 6px; font-size: 10px; margin: 0; background: var(--bg3);">+ Add
-                Param</button>
+          <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px;">
+            <div style="flex: 1; min-width: 220px;">
+              <label>HTTP Method</label>
+              <select id="replay-method" class="filter-select" style="width: 100%;">
+                <option>GET</option>
+                <option>POST</option>
+                <option>PUT</option>
+                <option>DELETE</option>
+                <option>PATCH</option>
+                <option>HEAD</option>
+                <option>OPTIONS</option>
+              </select>
             </div>
-            <div class="fuzz-param-header"
-              style="display: flex; gap: 4px; align-items: center; padding: 2px 4px; margin-bottom: 4px; font-size: 9px; font-weight: bold; color: var(--text3); text-transform: uppercase;">
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px;">
+            <div>
+              <label>Headers</label>
+              <textarea id="replay-headers" class="code-editor" rows="6" placeholder="Content-Type: application/json&#10;Authorization: Bearer xxx"></textarea>
+            </div>
+            <div>
+              <label>Body</label>
+              <textarea id="replay-body" class="code-editor" rows="6" placeholder="Request body (JSON, form data, etc.)"></textarea>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px;">
+            <button id="replay-send-btn" class="primary-btn">Replay</button>
+            <button id="fuzz-start-btn" class="tool-btn primary" style="height: 26px; padding: 0 12px; font-size: 11px; font-weight: bold; white-space: nowrap; margin: 0;">Fuzz</button>
+            <button id="fuzz-add-param-btn" class="tool-btn">+ Add Target</button>
+          </div>
+
+          <div style="background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 4px; margin-bottom: 6px;">
+              <span style="font-size: 10px; font-weight: bold; color: var(--text2); text-transform: uppercase;">🎯 Targets Setup</span>
+              <span style="font-size: 10px; color: var(--text3);">One-shot replay vs dictionary fuzz loop</span>
+            </div>
+            <div class="fuzz-param-header" style="display: flex; gap: 4px; align-items: center; padding: 2px 4px; margin-bottom: 4px; font-size: 9px; font-weight: bold; color: var(--text3); text-transform: uppercase;">
               <span style="width: 18px; text-align: center;">⚡</span>
               <span style="min-width: 50px; text-align: center;">Type</span>
               <span style="flex: 0.8;">Key</span>
@@ -184,17 +175,13 @@
               <span style="flex: 1.4;">Dictionary</span>
               <span style="width: 18px;"></span>
             </div>
-            <div id="fuzz-param-list-container"
-              style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
-              <div class="empty-hint" style="text-align: center; margin-top: 20px;">No parameters loaded. Choose a
-                request from history.</div>
+            <div id="fuzz-param-list-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
+              <div class="empty-hint" style="text-align: center; margin-top: 20px;">No targets identified. Choose a request from history or add your own.</div>
             </div>
           </div>
 
-        </div>
-
         <div
-          style="background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; display: flex; flex-direction: column; max-height: 120px;">
+          style="background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; display: flex; flex-direction: column; max-height: 120px; margin-top: 10px;">
           <span
             style="font-size: 9px; font-weight: bold; color: var(--text3); text-transform: uppercase; margin-bottom: 2px;">Pipeline
             Execution Console Logs</span>
@@ -236,6 +223,7 @@
     <div class="ctx-item" data-action="ctx-copy">Copy</div>
   </div>
 
+  <script src="payloads.js"></script>
   <script src="panel.js"></script>
 </body>
 
