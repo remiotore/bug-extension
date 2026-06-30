@@ -30,18 +30,10 @@ let saveTimeout = null;
 // ── Config (from endpoint-hunter) ──
 const CONFIG = {
   IGNORED_EXTENSIONS: ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.woff', '.woff2', '.ttf', '.m4s', '.ico', '.eot', '.otf'],
-  SENSITIVE_PATHS: ['/admin', '/api', '/auth', '/login', '/logout', '/token', '/user', '/users', '/account', '/internal', '/private', '/debug', '/phpmyadmin', '/graphql'],
-  SENSITIVE_PARAMS: ['token', 'auth', 'key', 'password', 'pwd', 'session', 'redirect', 'jwt', 'csrf', 'lostpassword', 'secret', 'api_key', 'apikey', 'access_token'],
-  SENSITIVE_METHODS: ['PUT', 'DELETE', 'PATCH'],
-  TAG_RULES: {
-    xss: { params: ['q', 'query', 'search', 'searchTerm', 'term', 'filter', 's', 'msg', 'comment', 'text', 'input', 'body', 'payload', 'combine', 'keys', 'name', 'title', 'content', 'value', 'data', 'html', 'url', 'redirect_uri', 'return_url', 'callback', 'next'], methods: ['GET', 'POST'] },
-    sqli: { params: ['id', 'user', 'uid', 'page', 'item', 'order', 'query', 'search', 'q', 'where', 'sql', 'sort', 'column', 'table', 'field', 'category', 'cat', 'type', 'group'], methods: ['GET', 'POST'] },
-    lfi: { params: ['file', 'path', 'template', 'include', 'view', 'download', 'render', 'page', 'document', 'folder', 'root', 'dir', 'doc', 'img', 'filename'], paths: ['/view', '/download', '/render', '/read', '/include'], methods: ['GET', 'POST'] },
-    idor: { params: ['id', 'user_id', 'account_id', 'order_id', 'uid', 'pid', 'profile_id', 'doc_id', 'invoice_id', 'record_id'], methods: ['GET', 'PUT', 'DELETE'] },
-    rce: { params: ['cmd', 'exec', 'command', 'run', 'execute', 'ping', 'func', 'module', 'load', 'process', 'shell', 'code', 'eval', 'ip', 'host', 'daemon'], methods: ['GET', 'POST'] },
-    ssrf: { params: ['url', 'uri', 'link', 'src', 'target', 'dest', 'source', 'callback', 'webhook', 'redirect', 'to', 'out', 'view', 'dir', 'path', 'domain', 'host', 'port', 'feed', 'validate', 'val', 'proxy', 'site', 'img_url', 'image_url'], methods: ['GET', 'POST'] },
-    auth: { paths: ['/admin', '/auth', '/login', '/account', '/internal', '/dashboard', '/manage', '/settings'], methods: ['PUT', 'DELETE'], params: ['lostpassword', 'recover', 'reset', 'reset_password', 'forgot', 'password_reset'] }
-  }
+  SENSITIVE_PATHS: TAG_DETECTION.SENSITIVE_PATHS,
+  SENSITIVE_PARAMS: TAG_DETECTION.SENSITIVE_PARAMS,
+  SENSITIVE_METHODS: TAG_DETECTION.SENSITIVE_METHODS,
+  TAG_RULES: TAG_DETECTION.TAG_RULES
 };
 
 // ── Detection functions ──
@@ -64,40 +56,6 @@ function isInteresting(details) {
   } catch (e) {}
 
   return false;
-}
-
-function isSensitiveEndpoint(url, method, params) {
-  let urlObj;
-  try { urlObj = new URL(url); } catch { return false; }
-  const path = urlObj.pathname.toLowerCase();
-  if (CONFIG.SENSITIVE_METHODS.includes(method)) return true;
-  if (CONFIG.SENSITIVE_PATHS.some(p => path.includes(p))) return true;
-  if ((params || []).some(p => CONFIG.SENSITIVE_PARAMS.includes(String(p).toLowerCase()))) return true;
-  return false;
-}
-
-function detectTags(url, method, params = [], status = 0, responseHeaders = []) {
-  let urlObj;
-  try { urlObj = new URL(url); } catch { return {}; }
-  const path = urlObj.pathname.toLowerCase();
-  const lowerParams = (params || []).map(p => String(p || '').toLowerCase());
-  const getHeader = (name) => {
-    if (!responseHeaders || !Array.isArray(responseHeaders)) return '';
-    const h = responseHeaders.find(x => x.name && x.name.toLowerCase() === name.toLowerCase());
-    return h ? (h.value || '').toLowerCase() : '';
-  };
-  const contentType = getHeader('content-type');
-  const R = CONFIG.TAG_RULES;
-
-  const xssDetected = R.xss.methods.includes(method) && lowerParams.some(p => R.xss.params.map(x => x.toLowerCase()).includes(p));
-  const sqliDetected = R.sqli.methods.includes(method) && lowerParams.some(p => R.sqli.params.map(x => x.toLowerCase()).includes(p));
-  const lfiDetected = R.lfi.methods.includes(method) && (lowerParams.some(p => R.lfi.params.map(x => x.toLowerCase()).includes(p)) || R.lfi.paths.some(p => path.includes(p)));
-  const idorDetected = R.idor.methods.includes(method) && (lowerParams.some(p => R.idor.params.map(x => x.toLowerCase()).includes(p)) || /\/\d+/.test(path));
-  const rceDetected = R.rce.methods.includes(method) && lowerParams.some(p => R.rce.params.map(x => x.toLowerCase()).includes(p));
-  const ssrfDetected = R.ssrf.methods.includes(method) && lowerParams.some(p => R.ssrf.params.map(x => x.toLowerCase()).includes(p));
-  const authDetected = R.auth.paths.some(p => path.includes(p)) || R.auth.methods.includes(method) || lowerParams.some(p => R.auth.params.map(x => x.toLowerCase()).includes(p)) || status === 403 || status === 401;
-
-  return { xss: !!xssDetected, sqli: !!sqliDetected, lfi: !!lfiDetected, idor: !!idorDetected, rce: !!rceDetected, ssrf: !!ssrfDetected, auth: !!authDetected };
 }
 
 // ── Endpoint persistence ──
@@ -299,10 +257,13 @@ function handleCompleted(details) {
     existing.count++;
     existing.latestValues = { ...(existing.latestValues || {}), ...currentParamValues };
     existing.lastSeen = Date.now();
-    // Merge new params
+    existing.status = details.statusCode;
     Array.from(allParams).forEach(p => {
       if (!existing.params.includes(p)) existing.params.push(p);
     });
+    const params = existing.params;
+    existing.sensitive = isSensitiveEndpoint(url.href, details.method, params);
+    existing.tags = detectTags(url.href, details.method, params, details.statusCode, details.responseHeaders);
   }
   saveEndpoints();
 }

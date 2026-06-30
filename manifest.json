@@ -23,6 +23,7 @@
   "devtools_page": "devtools.html",
   "background": {
     "scripts": [
+      "tag-detection.js",
       "background.js"
     ]
   },

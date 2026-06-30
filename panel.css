@@ -87,6 +87,15 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .req-finding-chip.ssrf { background: rgba(219,97,162,.16); color: var(--tag-ssrf); border-color: rgba(219,97,162,.28); }
 .req-finding-chip.auth { background: rgba(240,136,62,.16); color: var(--tag-auth); border-color: rgba(240,136,62,.28); }
 .req-item.has-findings { box-shadow: inset 0 0 0 1px rgba(88,166,255,.1), inset 4px 0 0 var(--accent); }
+.req-item.finding-xss { box-shadow: inset 0 0 0 1px rgba(163,113,247,.12), inset 4px 0 0 var(--tag-xss); }
+.req-item.finding-sqli { box-shadow: inset 0 0 0 1px rgba(57,210,224,.12), inset 4px 0 0 var(--tag-sqli); }
+.req-item.finding-lfi { box-shadow: inset 0 0 0 1px rgba(161,136,127,.12), inset 4px 0 0 var(--tag-lfi); }
+.req-item.finding-idor { box-shadow: inset 0 0 0 1px rgba(88,166,255,.12), inset 4px 0 0 var(--tag-idor); }
+.req-item.finding-rce { box-shadow: inset 0 0 0 1px rgba(248,81,73,.12), inset 4px 0 0 var(--tag-rce); }
+.req-item.finding-ssrf { box-shadow: inset 0 0 0 1px rgba(219,97,162,.12), inset 4px 0 0 var(--tag-ssrf); }
+.req-item.finding-auth { box-shadow: inset 0 0 0 1px rgba(240,136,62,.12), inset 4px 0 0 var(--tag-auth); }
+.req-item.finding-sensitive { box-shadow: inset 0 0 0 1px rgba(248,81,73,.12), inset 4px 0 0 var(--danger); }
+.icon-btn.intercept-mode { background: var(--accent3); color: #fff; border-color: var(--accent3); }
 
 /* ─── Detail section ─── */
 .detail-section { display: flex; justify-content: space-between; align-items: center; padding: 4px 10px; background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0; }
@@ -140,6 +149,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .tag-filter.tag-rce { color: var(--tag-rce); border-color: var(--tag-rce); }
 .tag-filter.tag-ssrf { color: var(--tag-ssrf); border-color: var(--tag-ssrf); }
 .tag-filter.tag-auth { color: var(--tag-auth); border-color: var(--tag-auth); }
+.tag-filter.tag-sensitive { color: var(--danger); border-color: var(--danger); }
 .tag-filter.active { color: #fff !important; }
 .tag-filter.tag-xss.active { background: var(--tag-xss); }
 .tag-filter.tag-sqli.active { background: var(--tag-sqli); }
@@ -148,6 +158,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .tag-filter.tag-rce.active { background: var(--tag-rce); }
 .tag-filter.tag-ssrf.active { background: var(--tag-ssrf); }
 .tag-filter.tag-auth.active { background: var(--tag-auth); }
+.tag-filter.tag-sensitive.active { background: var(--danger); }
 .tag-toggle-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text2); padding: 4px 10px; border-radius: var(--radius); font-size: 12px; cursor: pointer; }
 .tag-toggle-btn.active { background: var(--accent3); color: #fff; border-color: var(--accent3); }
 

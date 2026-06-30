@@ -68,7 +68,7 @@
         <button class="tag-filter tag-sensitive" data-tag="sensitive">Sensitive</button>
       </div>
       <div class="toolbar-right">
-        <button id="req-pause-btn" class="icon-btn" title="Pause/Resume capture">⏸️</button>
+        <button id="req-pause-btn" class="icon-btn" title="Pause capture & intercept requests">⏸️</button>
         <button id="req-export-btn" class="icon-btn" title="Export captured URLs">📥</button>
         <button id="req-clear-btn" class="icon-btn" title="Clear requests">🧹</button>
       </div>
@@ -99,7 +99,6 @@
             <button id="copy-curl-btn" class="small-btn" title="Copy as cURL" disabled>cURL</button>
             <button id="copy-python-btn" class="small-btn" title="Copy as Python" disabled>Python</button>
             <button id="copy-fetch-btn" class="small-btn" title="Copy as fetch()" disabled>Fetch</button>
-            <button id="toggle-intercept-btn" class="small-btn" title="Toggle live intercept">Intercept OFF</button>
           </div>
         </div>
 
@@ -211,6 +210,7 @@
     <div class="ctx-item" data-action="ctx-copy">Copy</div>
   </div>
 
+  <script src="tag-detection.js"></script>
   <script src="payloads.js"></script>
   <script src="panel.js"></script>
 </body>

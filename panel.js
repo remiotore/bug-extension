@@ -89,7 +89,7 @@ let useDevtoolsNetworkCapture = false;
 
 function recordCapturedRequest(req, source = 'network') {
   if (!req || !req.url) return;
-  if (isPaused) return;
+  if (isPaused && !req.intercepted) return;
 
   const requestId = req.requestId || `capture-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
   if (capturedRequests.some(existing => existing.requestId === requestId)) return;
@@ -168,11 +168,8 @@ port.onMessage.addListener((msg) => {
 
   if (msg.type === 'intercept_state') {
     interceptEnabled = Boolean(msg.enabled);
-    const btn = document.getElementById("toggle-intercept-btn");
-    if (btn) {
-      btn.textContent = interceptEnabled ? "Intercept ON" : "Intercept OFF";
-      btn.classList.toggle("active", interceptEnabled);
-    }
+    isPaused = interceptEnabled;
+    updateCapturePauseButton();
     return;
   }
 
@@ -315,18 +312,14 @@ function initRequestTab() {
   const pauseBtn = document.getElementById("req-pause-btn");
   pauseBtn.addEventListener("click", () => {
     isPaused = !isPaused;
-    pauseBtn.textContent = isPaused ? "▶️" : "⏸️";
-    pauseBtn.title = isPaused ? "Resume capture" : "Pause capture";
-    pauseBtn.classList.toggle("active", isPaused);
+    interceptEnabled = isPaused;
+    updateCapturePauseButton();
+    sendInterceptConfig();
   });
 
   document.getElementById("req-clear-btn").addEventListener("click", clearRequests);
 
-  document.getElementById("req-export-btn").addEventListener("click", () => {
-    const urls = capturedRequests.map(r => r.url).join("\n");
-    if (!urls) return alert("No requests to export!");
-    copyToClipboard(urls, "URLs exported to clipboard!");
-  });
+  document.getElementById("req-export-btn").addEventListener("click", exportCapturedUrls);
 
   // Code Generation Copy Buttons
   document.getElementById("copy-curl-btn").addEventListener("click", () => {
@@ -379,11 +372,9 @@ function initRequestTab() {
   // Fuzzing: Wire up the interactive fuzzer component controls safely
   const addParamBtn = document.getElementById("fuzz-add-param-btn");
   const startFuzzBtn = document.getElementById("fuzz-start-btn");
-  const toggleInterceptBtn = document.getElementById("toggle-intercept-btn");
 
   if (addParamBtn) addParamBtn.addEventListener("click", addNewBlankParameterRow);
   if (startFuzzBtn) startFuzzBtn.addEventListener("click", executeAttackMatrixPipeline);
-  if (toggleInterceptBtn) toggleInterceptBtn.addEventListener("click", toggleInterceptMode);
 
   // Wayback Check Button
   document.getElementById("wayback-check-btn").addEventListener("click", checkWayback);
@@ -443,7 +434,7 @@ function getEndpointMetadataForRequest(req) {
     return activeEndpoints.find(ep => {
       try {
         const epUrl = new URL(ep.url);
-        return ep.method === req.method && reqUrl.origin === epUrl.origin && reqUrl.pathname === epUrl.pathname;
+        return (ep.method || 'GET').toUpperCase() === (req.method || 'GET').toUpperCase() && reqUrl.origin === epUrl.origin && reqUrl.pathname === epUrl.pathname;
       } catch {
         return false;
       }
@@ -454,17 +445,32 @@ function getEndpointMetadataForRequest(req) {
 }
 
 function getRequestFindings(req) {
-  const endpoint = getEndpointMetadataForRequest(req);
-  if (!endpoint) return [];
+  if (!req) return [];
 
-  const findings = [];
-  if (endpoint.sensitive) findings.push('sensitive');
+  const body = req.requestBody || null;
+  const localFindings = getRequestFindingsFromData(
+    req.url,
+    req.method,
+    body,
+    req.statusCode,
+    req.responseHeaders
+  );
+
+  const endpoint = getEndpointMetadataForRequest(req);
+  if (!endpoint) return localFindings;
+
+  const merged = new Set(localFindings);
+  if (endpoint.sensitive) merged.add('sensitive');
   if (endpoint.tags) {
     Object.entries(endpoint.tags).forEach(([tag, value]) => {
-      if (value) findings.push(tag);
+      if (value) merged.add(tag);
     });
   }
-  return findings;
+  return Array.from(merged);
+}
+
+function getFindingIcon(tag) {
+  return (TAG_DETECTION.TAG_ICONS && TAG_DETECTION.TAG_ICONS[tag]) || '•';
 }
 
 function getRequestFindingBadges(req) {
@@ -473,7 +479,8 @@ function getRequestFindingBadges(req) {
 
   return `<span class="req-findings">${findings.map(tag => {
     const label = tag === 'sensitive' ? 'Sensitive' : tag.toUpperCase();
-    return `<span class="req-finding-chip ${tag === 'sensitive' ? 'sensitive' : tag}">${escapeHtml(label)}</span>`;
+    const icon = getFindingIcon(tag);
+    return `<span class="req-finding-chip ${tag === 'sensitive' ? 'sensitive' : tag}" title="${escapeHtml(label)}">${icon} ${escapeHtml(label)}</span>`;
   }).join('')}</span>`;
 }
 
@@ -602,7 +609,8 @@ function renderRequestList() {
   filteredRequests.forEach(req => {
     const item = document.createElement("div");
     const findingChips = getRequestFindings(req);
-    item.className = `req-item ${selectedRequest && selectedRequest.requestId === req.requestId ? 'selected' : ''} ${findingChips.length ? 'has-findings' : ''}`;
+    const primaryFinding = findingChips.length ? findingChips[0] : '';
+    item.className = `req-item ${selectedRequest && selectedRequest.requestId === req.requestId ? 'selected' : ''} ${findingChips.length ? 'has-findings' : ''} ${primaryFinding ? `finding-${primaryFinding}` : ''}`;
 
     let statusClass = "s2xx";
     if (req.statusCode >= 300 && req.statusCode < 400) statusClass = "s3xx";
@@ -740,14 +748,58 @@ async function executeReplay() {
   }
 }
 
-function toggleInterceptMode() {
-  interceptEnabled = !interceptEnabled;
-  const btn = document.getElementById("toggle-intercept-btn");
-  if (btn) {
-    btn.textContent = interceptEnabled ? "Intercept ON" : "Intercept OFF";
-    btn.classList.toggle("active", interceptEnabled);
+function updateCapturePauseButton() {
+  const pauseBtn = document.getElementById("req-pause-btn");
+  if (!pauseBtn) return;
+  if (isPaused) {
+    pauseBtn.textContent = "▶️";
+    pauseBtn.title = "Resume capture (disable intercept)";
+    pauseBtn.classList.add("active", "intercept-mode");
+  } else {
+    pauseBtn.textContent = "⏸️";
+    pauseBtn.title = "Pause capture & intercept requests";
+    pauseBtn.classList.remove("active", "intercept-mode");
   }
-  sendInterceptConfig();
+}
+
+function hasActiveRequestFilters() {
+  const query = document.getElementById("req-search")?.value?.trim();
+  if (query) return true;
+
+  const selects = ['req-method-filter', 'req-status-filter', 'req-param-filter', 'req-domain-filter', 'req-extension-filter'];
+  for (const id of selects) {
+    const values = getSelectedFilterValues(document.getElementById(id));
+    if (!isFilterSelectionAll(values)) return true;
+  }
+
+  return document.querySelectorAll("#req-finding-tags .tag-filter.active").length > 0;
+}
+
+function exportCapturedUrls() {
+  const source = hasActiveRequestFilters() ? filteredRequests : capturedRequests;
+  const seen = new Set();
+  const urls = [];
+  source.forEach(r => {
+    if (r.url && !seen.has(r.url)) {
+      seen.add(r.url);
+      urls.push(r.url);
+    }
+  });
+  if (!urls.length) {
+    return alert(hasActiveRequestFilters() ? "No matching requests to export!" : "No requests to export!");
+  }
+  const text = urls.join("\n");
+  copyToClipboard(text, `Exported ${urls.length} URL${urls.length === 1 ? '' : 's'} to clipboard`);
+}
+
+function sendInterceptConfig() {
+  try {
+    const tabId = getCurrentTabId();
+    registerCurrentPanelTarget();
+    port.postMessage({ type: 'set_intercept', tabId, enabled: interceptEnabled });
+  } catch (e) {
+    console.warn('Panel: failed to send intercept config', e);
+  }
 }
 
 function showInterceptedRequest(req) {
@@ -801,17 +853,7 @@ async function forwardInterceptedRequest(req) {
 }
 
 
-function sendInterceptConfig() {
-  try {
-    const tabId = getCurrentTabId();
-    registerCurrentPanelTarget();
-    port.postMessage({ type: 'set_intercept', tabId, enabled: interceptEnabled });
-  } catch (e) {
-    console.warn('Panel: failed to send intercept config', e);
-  }
-}
-
-// ── Active fuzzing ──// ============================================================================
+// ── Active fuzzing ──
 // ⚡ CORE INTERACTIVE FUZZER AND TARGET PLANNER ENGINE
 // ============================================================================
 
@@ -1433,11 +1475,40 @@ function initResizeHandle() {
 
 // ── General Utilities ──
 function copyToClipboard(text, successMessage) {
-  navigator.clipboard.writeText(text).then(() => {
-    alert(successMessage || "Copied to clipboard!");
-  }).catch(err => {
-    console.error("Clipboard copy failed", err);
-  });
+  const notify = (msg) => {
+    if (msg) alert(msg);
+  };
+
+  const fallbackCopy = () => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (ok) notify(successMessage || "Copied to clipboard!");
+      else notify("Copy failed — select and copy manually.");
+    } catch (err) {
+      document.body.removeChild(ta);
+      console.error("Clipboard copy failed", err);
+      notify("Copy failed — select and copy manually.");
+    }
+  };
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      notify(successMessage || "Copied to clipboard!");
+    }).catch(err => {
+      console.warn("Clipboard API failed, using fallback", err);
+      fallbackCopy();
+    });
+  } else {
+    fallbackCopy();
+  }
 }
 
 function escapeHtml(str) {
