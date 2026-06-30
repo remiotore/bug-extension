@@ -1,16 +1,134 @@
 // Shared vulnerability category detection (used by background + panel)
 const TAG_DETECTION = {
-  SENSITIVE_PATHS: ['/admin', '/api', '/auth', '/login', '/logout', '/token', '/user', '/users', '/account', '/internal', '/private', '/debug', '/phpmyadmin', '/graphql'],
-  SENSITIVE_PARAMS: ['token', 'auth', 'key', 'password', 'pwd', 'session', 'redirect', 'jwt', 'csrf', 'lostpassword', 'secret', 'api_key', 'apikey', 'access_token'],
+  SENSITIVE_PATHS: [
+    '/admin', '/api', '/auth', '/login', '/logout', '/token', '/user', '/users', '/account', '/internal', '/private', '/debug', '/phpmyadmin', '/graphql',
+    // Spanish
+    '/administrador', '/iniciar-sesion', '/cuenta', '/privado', '/interno',
+    // French
+    '/administrateur', '/connexion', '/deconnexion', '/compte', '/prive', '/interne',
+    // German
+    '/administrator', '/anmelden', '/abmelden', '/konto', '/privat', '/intern',
+    // Chinese
+    '/guanli', '/denglu', '/tuichu', '/zhanghu', '/neibu', '/siwang', // Pinyin / common structures
+    // Russian
+    '/admin', '/vhod', '/vyhod', '/akkaunt', '/vnutrenniy', '/lichnyy'
+  ],
+  SENSITIVE_PARAMS: [
+    'token', 'auth', 'key', 'password', 'pwd', 'session', 'redirect', 'jwt', 'csrf', 'lostpassword', 'secret', 'api_key', 'apikey', 'access_token',
+    // Spanish
+    'clave', 'contrasena', 'contrasenia', 'sesion', 'redirigir', 'secreto',
+    // French
+    'cle', 'motdepasse', 'mdp', 'session', 'redirection', 'secret',
+    // German
+    'schluessel', 'passwort', 'kennwort', 'sitzung', 'weiterleitung', 'geheim',
+    // Chinese
+    'mi-ma', 'mima', 'yaoshi', 'miyue', 'huihua', 'chongzhi',
+    // Russian
+    'parol', 'klyuch', 'sessiya', 'sekret', 'perevod', 'sbros'
+  ],
   SENSITIVE_METHODS: ['PUT', 'DELETE', 'PATCH'],
   TAG_RULES: {
-    xss: { params: ['q', 'query', 'search', 'searchTerm', 'term', 'filter', 's', 'msg', 'comment', 'text', 'input', 'body', 'payload', 'combine', 'keys', 'name', 'title', 'content', 'value', 'data', 'html', 'url', 'redirect_uri', 'return_url', 'callback', 'next'], methods: ['GET', 'POST'] },
-    sqli: { params: ['id', 'user', 'uid', 'page', 'item', 'order', 'query', 'search', 'q', 'where', 'sql', 'sort', 'column', 'table', 'field', 'category', 'cat', 'type', 'group'], methods: ['GET', 'POST'] },
-    lfi: { params: ['file', 'path', 'template', 'include', 'view', 'download', 'render', 'page', 'document', 'folder', 'root', 'dir', 'doc', 'img', 'filename'], paths: ['/view', '/download', '/render', '/read', '/include'], methods: ['GET', 'POST'] },
-    idor: { params: ['id', 'user_id', 'account_id', 'order_id', 'uid', 'pid', 'profile_id', 'doc_id', 'invoice_id', 'record_id'], methods: ['GET', 'PUT', 'DELETE'] },
-    rce: { params: ['cmd', 'exec', 'command', 'run', 'execute', 'ping', 'func', 'module', 'load', 'process', 'shell', 'code', 'eval', 'ip', 'host', 'daemon'], methods: ['GET', 'POST'] },
-    ssrf: { params: ['url', 'uri', 'link', 'src', 'target', 'dest', 'source', 'callback', 'webhook', 'redirect', 'to', 'out', 'view', 'dir', 'path', 'domain', 'host', 'port', 'feed', 'validate', 'val', 'proxy', 'site', 'img_url', 'image_url'], methods: ['GET', 'POST'] },
-    auth: { paths: ['/admin', '/auth', '/login', '/account', '/internal', '/dashboard', '/manage', '/settings'], methods: ['PUT', 'DELETE'], params: ['lostpassword', 'recover', 'reset', 'reset_password', 'forgot', 'password_reset'] }
+    xss: { 
+      params: [
+        'q', 'query', 'search', 'searchTerm', 'term', 'filter', 's', 'msg', 'comment', 'text', 'input', 'body', 'payload', 'combine', 'keys', 'name', 'title', 'content', 'value', 'data', 'html', 'url', 'redirect_uri', 'return_url', 'callback', 'next',
+        // Multilingual additions
+        'buscar', 'busqueda', 'texto', 'nombre', 'titulo', 'contenido', 'valor', // ES
+        'recherche', 'chercher', 'mot', 'nom', 'titre', 'contenu', 'valeur',     // FR
+        'suche', 'suchen', 'text', 'name', 'titel', 'inhalt', 'wert',            // DE
+        'sousuo', 'chaxun', 'mingzi', 'biaoti', 'neirong', 'zhi',                // CN (Pinyin/Common)
+        'poisk', 'zapros', 'tekst', 'imya', 'nazvanie', 'znachenie', 'dannye'    // RU
+      ], 
+      methods: ['GET', 'POST'] 
+    },
+    sqli: { 
+      params: [
+        'id', 'user', 'uid', 'page', 'item', 'order', 'query', 'search', 'q', 'where', 'sql', 'sort', 'column', 'table', 'field', 'category', 'cat', 'type', 'group',
+        // Multilingual additions
+        'usuario', 'pagina', 'articulo', 'orden', 'ordenar', 'columna', 'tabla', 'categoria', // ES
+        'utilisateur', 'page', 'article', 'ordre', 'trier', 'colonne', 'table', 'categorie',   // FR
+        'benutzer', 'seite', 'artikel', 'sortieren', 'spalte', 'tabelle', 'kategorie',         // DE
+        'yonghu', 'yemian', 'xiangmu', 'paixu', 'liebiao', 'fenlei',                           // CN
+        'polzovatel', 'stranica', 'zapros', 'sortirovka', 'kolonka', 'tablica', 'kategoriya'   // RU
+      ], 
+      methods: ['GET', 'POST'] 
+    },
+    lfi: { 
+      params: [
+        'file', 'path', 'template', 'include', 'view', 'download', 'render', 'page', 'document', 'folder', 'root', 'dir', 'doc', 'img', 'filename',
+        // Multilingual additions
+        'archivo', 'ruta', 'plantilla', 'vista', 'descargar', 'documento', 'carpeta', 'fichero', // ES
+        'fichier', 'chemin', 'modele', 'vue', 'telecharger', 'document', 'dossier',              // FR
+        'datei', 'pfad', 'vorlage', 'ansicht', 'herunterladen', 'dokument', 'ordner',            // DE
+        'wenjian', 'lujing', 'muban', 'chakan', 'xiazai', 'wendang',                             // CN
+        'fayl', 'put', 'shablon', 'prosmotr', 'skachat', 'dokument', 'papka', 'imyafayla'        // RU
+      ], 
+      paths: [
+        '/view', '/download', '/render', '/read', '/include',
+        '/vista', '/descargar', '/leer', // ES
+        '/vue', '/telecharger', '/lire',  // FR
+        '/ansicht', '/laden', '/lesen',   // DE
+        '/chakan', '/xiazai',             // CN
+        '/prosmotr', '/skachat', '/chitat'// RU
+      ], 
+      methods: ['GET', 'POST'] 
+    },
+    idor: { 
+      params: [
+        'id', 'user_id', 'account_id', 'order_id', 'uid', 'pid', 'profile_id', 'doc_id', 'invoice_id', 'record_id',
+        // Multilingual additions
+        'id_usuario', 'id_cuenta', 'id_pedido', 'id_factura', // ES
+        'id_utilisateur', 'id_compte', 'id_commande', 'id_facture', // FR
+        'benutzer_id', 'konto_id', 'auftrag_id', 'rechnung_id', // DE
+        'yonghu_id', 'zhanghu_id', 'dingdan_id', // CN
+        'id_polzovatelya', 'id_akkaunta', 'id_zakaza', 'id_scheta' // RU
+      ], 
+      methods: ['GET', 'PUT', 'DELETE'] 
+    },
+    rce: { 
+      params: [
+        'cmd', 'exec', 'command', 'run', 'execute', 'ping', 'func', 'module', 'load', 'process', 'shell', 'code', 'eval', 'ip', 'host', 'daemon',
+        // Multilingual additions
+        'comando', 'ejecutar', 'cargar', 'proceso', 'codigo', // ES
+        'commande', 'executer', 'charger', 'processus', 'code', // FR
+        'befehl', 'ausfuehren', 'laden', 'prozess', 'code', // DE
+        'mingling', 'zhixing', 'jiazai', 'daima', // CN
+        'komanda', 'vypolnit', 'zapusk', 'kod', 'process' // RU
+      ], 
+      methods: ['GET', 'POST'] 
+    },
+    ssrf: { 
+      params: [
+        'url', 'uri', 'link', 'src', 'target', 'dest', 'source', 'callback', 'webhook', 'redirect', 'to', 'out', 'view', 'dir', 'path', 'domain', 'host', 'port', 'feed', 'validate', 'val', 'proxy', 'site', 'img_url', 'image_url',
+        // Multilingual additions
+        'enlace', 'destino', 'origen', 'redirigir', 'dominio', 'puerto', 'sitio', // ES
+        'lien', 'destination', 'source', 'redirection', 'domaine', 'port', 'site', // FR
+        'link', 'ziel', 'quelle', 'weiterleitung', 'domaene', 'hafen', 'seite', // DE
+        'lianjie', 'mubiao', 'laiyuan', 'daohang', 'yuming', 'duankou', 'wangzhan', // CN
+        'ssylka', 'cel', 'istochnik', 'domen', 'port', 'sayt' // RU
+      ], 
+      methods: ['GET', 'POST'] 
+    },
+    auth: { 
+      paths: [
+        '/admin', '/auth', '/login', '/account', '/internal', '/dashboard', '/manage', '/settings',
+        // Multilingual additions
+        '/configuracion', '/gestion', '/panel', // ES
+        '/configuration', '/gestion', '/tableau-de-bord', // FR
+        '/einstellungen', '/verwaltung', '/dashboard', // DE
+        '/shezhi', '/guanli', '/mianban', // CN
+        '/nastroyki', '/upravlenie', '/panel-upravleniya' // RU
+      ], 
+      methods: ['PUT', 'DELETE'], 
+      params: [
+        'lostpassword', 'recover', 'reset', 'reset_password', 'forgot', 'password_reset',
+        // Multilingual additions
+        'recuperar', 'restablecer', 'olvido', 'cambiar_contrasena', // ES
+        'recuperer', 'reinitialiser', 'oublie', 'changement_mdp', // FR
+        'wiederherstellen', 'zuruecksetzen', 'vergessen', // DE
+        'zhaohui', 'chongzhi', 'wangji', // CN
+        'vosstanovit', 'sbros', 'zabyl', 'sbros_parolya' // RU
+      ] 
+    }
   },
   TAG_ICONS: {
     xss: '🎨',
