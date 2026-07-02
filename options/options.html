@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bug Extension - Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+
+<body>
+  <div class="settings-container">
+    <header class="settings-header">
+      <h1>🐛 Bug Extension Settings</h1>
+      <p>Customize your security testing toolkit</p>
+    </header>
+
+    <section class="settings-section">
+      <div class="section-header">
+        <h2>🎯 Target Identifiers</h2>
+        <p class="section-desc">Edit keywords that trigger vulnerability detection (one per line)</p>
+      </div>
+      <textarea id="target-identifiers" class="settings-textarea" placeholder="api&#10;admin&#10;user&#10;test&#10;debug"></textarea>
+      <button id="save-identifiers" class="save-btn">Save Identifiers</button>
+    </section>
+
+    <section class="settings-section">
+      <div class="section-header">
+        <h2>💾 Custom Payloads</h2>
+        <p class="section-desc">Add custom fuzzing payloads (one per line)</p>
+      </div>
+      <textarea id="custom-payloads" class="settings-textarea" placeholder="payload1&#10;payload2&#10;payload3"></textarea>
+      <button id="save-payloads" class="save-btn">Save Payloads</button>
+    </section>
+
+    <section class="settings-section">
+      <div class="section-header">
+        <h2>🔑 API Keys</h2>
+        <p class="section-desc">Store API keys for external services (encrypted storage)</p>
+      </div>
+      <div class="api-keys-grid">
+        <div class="api-key-group">
+          <label for="vt-api-key">VirusTotal API Key:</label>
+          <input type="password" id="vt-api-key" class="settings-input" placeholder="Your VirusTotal API key">
+        </div>
+        <div class="api-key-group">
+          <label for="intelx-api-key">IntelX API Key:</label>
+          <input type="password" id="intelx-api-key" class="settings-input" placeholder="Your IntelX API key">
+        </div>
+      </div>
+      <button id="save-api-keys" class="save-btn">Save API Keys</button>
+    </section>
+
+    <section class="settings-section">
+      <div class="section-header">
+        <h2>⚙️ Fuzzer Settings</h2>
+        <p class="section-desc">Configure fuzzing behavior</p>
+      </div>
+      <div class="fuzzer-settings-grid">
+        <div class="fuzzer-option">
+          <label for="fuzzer-letter-max">Max Letter Length:</label>
+          <input type="number" id="fuzzer-letter-max" class="settings-input" value="3" min="1" max="5">
+          <small>Maximum length for letter range generation (a→z, aa→zz, aaa→zzz)</small>
+        </div>
+        <div class="fuzzer-option">
+          <label for="fuzzer-number-max">Max Number Range:</label>
+          <input type="number" id="fuzzer-number-max" class="settings-input" value="9999" min="100" max="999999">
+          <small>Maximum number for range generation (0→max)</small>
+        </div>
+        <div class="fuzzer-option">
+          <label for="fuzzer-padding">Number Padding:</label>
+          <select id="fuzzer-padding" class="settings-select">
+            <option value="none">None</option>
+            <option value="2">2 digits</option>
+            <option value="3">3 digits</option>
+            <option value="4">4 digits</option>
+            <option value="5">5 digits</option>
+          </select>
+          <small>Padding for generated numbers (0001, 0010, 0100)</small>
+        </div>
+      </div>
+      <button id="save-fuzzer-settings" class="save-btn">Save Fuzzer Settings</button>
+    </section>
+
+    <section class="settings-section">
+      <div class="section-header">
+        <h2>🔄 Dictionaries & Updates</h2>
+        <p class="section-desc">Edit your dictionaries directly or fetch updates from the repository.</p>
+      </div>
+      
+      <label>Tag-Detection Dictionary (JavaScript code)</label>
+      <textarea id="edit-tags-code" class="settings-textarea" style="height: 150px; font-family: monospace; white-space: pre; font-size: 11px;" placeholder="var TAG_DETECTION = { ... };"></textarea>
+      <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+        <button id="save-tags-code" class="save-btn">Save Tag-Detections</button>
+        <button id="btn-update-tags" class="save-btn" style="background: var(--accent2);">Fetch from Repo</button>
+      </div>
+
+      <label>Payloads Dictionary (JavaScript code)</label>
+      <textarea id="edit-payloads-code" class="settings-textarea" style="height: 150px; font-family: monospace; white-space: pre; font-size: 11px;" placeholder="var NucleiFuzzDictionaries = { ... };"></textarea>
+      <div style="display: flex; gap: 10px;">
+        <button id="save-payloads-code" class="save-btn">Save Payloads</button>
+        <button id="btn-update-payloads" class="save-btn" style="background: var(--accent2);">Fetch from Repo</button>
+      </div>
+    </section>
+
+    <div id="status-message" class="status-message"></div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+
+</html>

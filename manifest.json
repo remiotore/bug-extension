@@ -21,6 +21,10 @@
     "activeTab"
   ],
   "devtools_page": "devtools.html",
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
   "background": {
     "scripts": [
       "tag-detection.js",

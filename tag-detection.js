@@ -1,5 +1,5 @@
 // Shared vulnerability category detection (used by background + panel)
-const TAG_DETECTION = {
+var TAG_DETECTION = {
   SENSITIVE_PATHS: [
     '/admin', '/api', '/auth', '/login', '/logout', '/token', '/user', '/users', '/account', '/internal', '/private', '/debug', '/phpmyadmin', '/graphql',
     '/administrador', '/iniciar-sesion', '/cuenta', '/privado', '/interno',           // ES

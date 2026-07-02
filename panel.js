@@ -86,6 +86,45 @@ let activeTheme = 'dark';
 let activeEndpoints = [];
 let interceptEnabled = false;
 let useDevtoolsNetworkCapture = false;
+let favorites = new Set();
+let collectionFilterActive = false;
+
+// Load custom settings into TAG_DETECTION and NucleiFuzzDictionaries
+async function loadCustomSettings() {
+  try {
+    const data = await browser.storage.local.get(['target_identifiers', 'custom_payloads', 'updated_payloads_code', 'updated_tags_code']);
+
+    if (data.updated_tags_code) {
+      try { eval(data.updated_tags_code); } catch (e) { console.error('Failed to load updated tags', e); }
+    }
+    if (data.updated_payloads_code) {
+      try { eval(data.updated_payloads_code); } catch (e) { console.error('Failed to load updated payloads', e); }
+    }
+
+    // Apply custom target identifiers to TAG_DETECTION
+    if (data.target_identifiers && Array.isArray(data.target_identifiers) && data.target_identifiers.length > 0) {
+      if (!TAG_DETECTION.SENSITIVE_PARAMS) {
+        TAG_DETECTION.SENSITIVE_PARAMS = [];
+      }
+      // Add custom identifiers to the existing list (convert to lowercase for consistency)
+      data.target_identifiers.forEach(identifier => {
+        const normalized = identifier.trim().toLowerCase();
+        if (normalized && !TAG_DETECTION.SENSITIVE_PARAMS.includes(normalized)) {
+          TAG_DETECTION.SENSITIVE_PARAMS.push(normalized);
+        }
+      });
+    }
+
+    // Apply custom payloads to NucleiFuzzDictionaries
+    if (data.custom_payloads && Array.isArray(data.custom_payloads) && data.custom_payloads.length > 0) {
+      if (typeof NucleiFuzzDictionaries === 'object' && NucleiFuzzDictionaries) {
+        NucleiFuzzDictionaries.custom = data.custom_payloads.filter(p => p.trim());
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load custom settings:', e);
+  }
+}
 
 function recordCapturedRequest(req, source = 'network') {
   if (!req || !req.url) return;
@@ -185,7 +224,7 @@ port.onMessage.addListener((msg) => {
       // Convert to captured-request shape so it appears in the main requests list
       const ts = Date.now();
       const captured = {
-        requestId: `sent-${ts}-${Math.floor(Math.random()*1000)}`,
+        requestId: `sent-${ts}-${Math.floor(Math.random() * 1000)}`,
         url: req.url,
         method: (req.method || 'GET').toUpperCase(),
         type: 'fetch',
@@ -208,20 +247,23 @@ port.onMessage.addListener((msg) => {
           resultsConsole.innerHTML += line;
           resultsConsole.scrollTop = resultsConsole.scrollHeight;
         }
-      } catch (e) {}
+      } catch (e) { }
 
       console.log('Sent request (fuzz/replay):', captured);
-    } catch (e) {}
+    } catch (e) { }
   }
 });
 
 document.addEventListener("DOMContentLoaded", () => {
+  loadCustomSettings();
   initTabs();
   initTheme();
   initRequestTab();
   initNetworkCapture();
   initResizeHandle();
   initContextMenu();
+  loadFavorites();
+  initToolsTab();
   registerCurrentPanelTarget();
 
   // Load initial endpoint data for inline findings
@@ -231,6 +273,14 @@ document.addEventListener("DOMContentLoaded", () => {
   browser.storage.onChanged.addListener((changes) => {
     if (changes.endpoints) {
       loadEndpointsFromStorage();
+    }
+    if (changes.favorites) {
+      loadFavorites();
+      applyRequestFilters();
+    }
+    // Reload custom settings when they change
+    if (changes.target_identifiers || changes.custom_payloads) {
+      loadCustomSettings();
     }
   });
 });
@@ -278,19 +328,42 @@ function initTabs() {
 // ── Theme Management ──
 function initTheme() {
   const themeBtn = document.getElementById("theme-toggle");
-  themeBtn.addEventListener("click", () => {
-    activeTheme = activeTheme === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute("data-theme", activeTheme);
-    themeBtn.textContent = activeTheme === 'dark' ? '🌙' : '☀️';
-  });
+  if (themeBtn) {
+    themeBtn.addEventListener("click", () => {
+      activeTheme = activeTheme === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute("data-theme", activeTheme);
+      themeBtn.textContent = activeTheme === 'dark' ? '🌙' : '☀️';
+    });
+  }
+
+  // Settings Button - Opens Options Page
+  const settingsBtn = document.getElementById("settings-btn");
+  if (settingsBtn) {
+    settingsBtn.addEventListener("click", () => {
+      window.open(browser.runtime.getURL("options/options.html"), "_blank");
+    });
+  }
 
   // Global Clear Button
-  document.getElementById("clear-all-btn").addEventListener("click", () => {
-    if (confirm("Clear all captured requests and endpoints?")) {
-      clearRequests();
-      clearEndpoints();
-    }
-  });
+  const clearBtn = document.getElementById("clear-all-btn");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      if (confirm("Clear all captured requests, collection, and endpoints?")) {
+        clearRequests();
+        clearEndpoints();
+      }
+    });
+  }
+
+  // Collection Filter Button
+  const collectionBtn = document.getElementById("collection-filter");
+  if (collectionBtn) {
+    collectionBtn.addEventListener("click", () => {
+      collectionFilterActive = !collectionFilterActive;
+      collectionBtn.classList.toggle("active");
+      applyRequestFilters();
+    });
+  }
 }
 
 // ── Request Capturing Tab Logic ──
@@ -317,7 +390,7 @@ function initRequestTab() {
     sendInterceptConfig();
   });
 
-  document.getElementById("req-clear-btn").addEventListener("click", clearRequests);
+
 
   document.getElementById("req-export-btn").addEventListener("click", exportCapturedUrls);
 
@@ -376,12 +449,9 @@ function initRequestTab() {
   if (addParamBtn) addParamBtn.addEventListener("click", addNewBlankParameterRow);
   if (startFuzzBtn) startFuzzBtn.addEventListener("click", executeAttackMatrixPipeline);
 
-  // Wayback Check Button
-  document.getElementById("wayback-check-btn").addEventListener("click", checkWayback);
-  document.getElementById("wayback-open-btn").addEventListener("click", () => {
-    const url = document.getElementById("wayback-url-input").value;
-    if (url) window.open(`https://web.archive.org/web/*/${encodeURIComponent(url)}`, '_blank');
-  });
+  // Wayback Check Button (removed - now in Tools tab)
+  // document.getElementById("wayback-check-btn")...
+  // Wayback functionality moved to Tools tab
 }
 
 function updateRequestCountBadge() {
@@ -414,7 +484,7 @@ function getRequestExtension(urlStr) {
     if (lastDot > lastSlash) {
       return pathname.substring(lastDot).toLowerCase();
     }
-  } catch (e) {}
+  } catch (e) { }
   return 'none';
 }
 
@@ -525,18 +595,23 @@ function applyRequestFilters() {
   const selectedFindings = Array.from(document.querySelectorAll("#req-finding-tags .tag-filter.active")).map(btn => btn.getAttribute('data-tag'));
 
   filteredRequests = capturedRequests.filter(r => {
-    // 1. Core Text/Query search mapping
+    // 1. Collection (Favorites) Filter
+    if (collectionFilterActive && !favorites.has(r.requestId)) {
+      return false;
+    }
+
+    // 2. Core Text/Query search mapping
     const matchesQuery = r.url.toLowerCase().includes(query) ||
       String(r.statusCode || '').includes(query) ||
       r.method.toLowerCase().includes(query);
 
-    // 2. HTTP Method Filter
+    // 3. HTTP Method Filter
     let matchesMethod = true;
     if (!isFilterSelectionAll(selectedMethods)) {
       matchesMethod = selectedMethods.includes(r.method);
     }
 
-    // 3. Domain/Origin Filter
+    // 4. Domain/Origin Filter
     let matchesDomain = true;
     if (!isFilterSelectionAll(selectedDomains)) {
       try {
@@ -544,7 +619,7 @@ function applyRequestFilters() {
       } catch { matchesDomain = false; }
     }
 
-    // 4. Status Code Range Evaluation
+    // 5. Status Code Range Evaluation
     let matchesStatus = true;
     if (!isFilterSelectionAll(selectedStatuses)) {
       const statusCode = r.statusCode;
@@ -560,7 +635,7 @@ function applyRequestFilters() {
       }
     }
 
-    // 5. Parameter Presence Evaluation (Detects URL queries or POST/PUT bodies)
+    // 6. Parameter Presence Evaluation (Detects URL queries or POST/PUT bodies)
     let matchesParams = true;
     if (!isFilterSelectionAll(selectedParams)) {
       let hasParameters = false;
@@ -575,13 +650,13 @@ function applyRequestFilters() {
       matchesParams = selectedParams.some(paramValue => (paramValue === 'has-params' && hasParameters) || (paramValue === 'no-params' && !hasParameters));
     }
 
-    // 6. Extension Filter
+    // 7. Extension Filter
     let matchesExtension = true;
     if (!isFilterSelectionAll(selectedExtensions)) {
       matchesExtension = selectedExtensions.includes(getRequestExtension(r.url));
     }
 
-    // 7. Endpoint Findings Filter
+    // 8. Endpoint Findings Filter
     let matchesFindings = true;
     if (selectedFindings.length > 0) {
       const findings = getRequestFindings(r);
@@ -610,7 +685,9 @@ function renderRequestList() {
     const item = document.createElement("div");
     const findingChips = getRequestFindings(req);
     const primaryFinding = findingChips.length ? findingChips[0] : '';
-    item.className = `req-item ${selectedRequest && selectedRequest.requestId === req.requestId ? 'selected' : ''} ${findingChips.length ? 'has-findings' : ''} ${primaryFinding ? `finding-${primaryFinding}` : ''}`;
+    const isFavorite = favorites.has(req.requestId);
+
+    item.className = `req-item ${selectedRequest && selectedRequest.requestId === req.requestId ? 'selected' : ''} ${isFavorite ? 'favorited' : ''} ${findingChips.length ? 'has-findings' : ''} ${primaryFinding ? `finding-${primaryFinding}` : ''}`;
 
     let statusClass = "s2xx";
     if (req.statusCode >= 300 && req.statusCode < 400) statusClass = "s3xx";
@@ -618,12 +695,19 @@ function renderRequestList() {
     if (req.statusCode >= 500) statusClass = "s5xx";
 
     item.innerHTML = `
+      <button class="favorite-btn ${isFavorite ? 'active' : ''}" data-request-id="${req.requestId}" title="Add to collection">⭐</button>
       <span class="req-method ${req.method}">${req.method}</span>
       <span class="req-url" title="${escapeHtml(req.url)}">${escapeHtml(req.url)}</span>
       ${getRequestFindingBadges(req)}
       <span class="req-status ${statusClass}">${req.statusCode || '---'}</span>
       <span class="req-type">${escapeHtml(req.type || '')}</span>
     `;
+
+    const favBtn = item.querySelector('.favorite-btn');
+    favBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleFavorite(req.requestId);
+    });
 
     item.addEventListener("click", () => {
       document.querySelectorAll(".req-item").forEach(i => i.classList.remove("selected"));
@@ -679,14 +763,16 @@ function selectRequestItem(req) {
   setupFuzzerTabFromSelectedRequest(req);
   document.getElementById("fuzz-url").value = req.url;
 
-  // Populate Wayback URL input field
-  document.getElementById("wayback-url-input").value = req.url;
+  // Populate Tools BASE URL field
+  document.getElementById("tools-base-url").value = req.url;
 }
 
 function clearRequests() {
   capturedRequests = [];
   filteredRequests = [];
   selectedRequest = null;
+  favorites.clear();
+  browser.storage.local.set({ favorites: [] });
   updateRequestCountBadge();
   updateExtensionFilters();
   applyRequestFilters();
@@ -865,6 +951,7 @@ let currentFuzzParameters = [];
 function buildDictionaryOptionsHtml(selectedValue) {
   const presets = [
     { value: '', label: '-- None --' },
+    { value: 'custom', label: '✨ Custom' },
     { value: 'cmdi', label: '🐚 CMDi' },
     { value: 'lfi', label: '📂 LFI' },
     { value: 'xss', label: '🎨 XSS' },
@@ -936,6 +1023,17 @@ function setupFuzzerTabFromSelectedRequest(req) {
     }
   }
 
+  // Parse request headers
+  if (req.requestHeaders && Array.isArray(req.requestHeaders)) {
+    const headersToSkip = ['content-length', 'content-type', 'host', 'connection', 'user-agent', 'accept-encoding'];
+    req.requestHeaders.forEach(h => {
+      const headerName = (h.name || '').toLowerCase();
+      if (h.name && !headersToSkip.includes(headerName)) {
+        currentFuzzParameters.push({ type: 'header', key: h.name, value: h.value || '', active: false, dictionary: '' });
+      }
+    });
+  }
+
   renderFuzzerParameterMatrixRows();
 }
 
@@ -967,6 +1065,7 @@ function renderFuzzerParameterMatrixRows() {
         <option value="query" ${param.type === 'query' ? 'selected' : ''}>query</option>
         <option value="body-form" ${param.type === 'body-form' ? 'selected' : ''}>body-form</option>
         <option value="body-json" ${param.type === 'body-json' ? 'selected' : ''}>body-json</option>
+        <option value="header" ${param.type === 'header' ? 'selected' : ''}>header</option>
         <option value="url" ${isUrlTarget ? 'selected' : ''}>url</option>
         <option value="path" ${param.type === 'path' ? 'selected' : ''}>path</option>
       </select>
@@ -1043,6 +1142,8 @@ function appendQueryString(url, queryString) {
 async function executeAttackMatrixPipeline() {
   const baseUrl = document.getElementById("fuzz-url").value.trim();
   const oastDomain = document.getElementById("fuzz-oast-domain").value.trim() || "interact.sh";
+  const fuzzDelay = parseInt(document.getElementById("fuzz-delay").value, 10) || 0;
+  const useFfufAc = document.getElementById("fuzz-ffuf-ac").checked;
   const resultsConsole = document.getElementById("fuzz-results");
 
   if (!baseUrl) {
@@ -1072,6 +1173,28 @@ async function executeAttackMatrixPipeline() {
   resultsConsole.innerHTML = `<span style="color: var(--accent);">⚡ Running attack loop cycles against ${targetParameters.length} parameter(s)...</span><br><br>`;
 
   let totalRequests = 0;
+  let baselineStatuses = new Set();
+  let baselineSizes = new Set();
+
+  if (useFfufAc) {
+    resultsConsole.innerHTML += `<span style="color: var(--accent);">⏳ Calibrating base responses...</span><br>`;
+    try {
+      const baselineReq = {
+        method: document.getElementById("replay-method").value,
+        url: baseUrl,
+        headers: {}, // simplified
+        body: null
+      };
+      const baselineRes = await performRequestInPage(baselineReq);
+      if (baselineRes.ok) {
+        baselineStatuses.add(baselineRes.status);
+        baselineSizes.add(baselineRes.bodyLength);
+        resultsConsole.innerHTML += `<span style="color: var(--accent2);">✅ Calibration complete: status=${baselineRes.status}, size=${baselineRes.bodyLength || 0}</span><br><br>`;
+      }
+    } catch (e) {
+      resultsConsole.innerHTML += `<span style="color: var(--danger);">⚠️ Calibration failed: ${e.message}</span><br><br>`;
+    }
+  }
 
   // For each active parameter, iterate its dictionary payloads
   for (const fuzzTarget of targetParameters) {
@@ -1081,7 +1204,12 @@ async function executeAttackMatrixPipeline() {
       continue;
     }
 
-    const targetLabel = (fuzzTarget.type === 'url' || fuzzTarget.type === 'path') ? 'URL target' : 'param';
+    let targetLabel = 'param';
+    if (fuzzTarget.type === 'url' || fuzzTarget.type === 'path') {
+      targetLabel = 'URL target';
+    } else if (fuzzTarget.type === 'header') {
+      targetLabel = 'header';
+    }
     resultsConsole.innerHTML += `<div style="color: var(--accent); border-bottom: 1px solid var(--border); padding: 4px 0; margin-bottom: 4px; font-weight: bold;">🎯 Fuzzing ${targetLabel}: <code>${escapeHtml(fuzzTarget.key || fuzzTarget.type)}</code> with <strong>${fuzzTarget.dictionary}</strong> (${payloads.length} payloads)</div>`;
 
     for (const rawPayload of payloads) {
@@ -1104,6 +1232,9 @@ async function executeAttackMatrixPipeline() {
           executionUrl = replacePathParamValue(executionUrl, p.key, runtimeValue);
         } else if (p.type === 'query') {
           queryBuilder.append(p.key, runtimeValue);
+        } else if (p.type === 'header') {
+          fetchOptions.headers = fetchOptions.headers || {};
+          fetchOptions.headers[p.key] = runtimeValue;
         } else if (p.type === 'body-form') {
           formBodyBuilder.append(p.key, runtimeValue);
           hasBody = true;
@@ -1122,7 +1253,7 @@ async function executeAttackMatrixPipeline() {
         fetchOptions.method = 'POST';
         fetchOptions.headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
         fetchOptions.body = formBodyBuilder.toString();
-      } else       if (hasBody && bodyType === 'json' && Object.keys(jsonBodyObj).length > 0) {
+      } else if (hasBody && bodyType === 'json' && Object.keys(jsonBodyObj).length > 0) {
         fetchOptions.method = 'POST';
         fetchOptions.headers = { 'Content-Type': 'application/json' };
         fetchOptions.body = JSON.stringify(jsonBodyObj);
@@ -1138,56 +1269,37 @@ async function executeAttackMatrixPipeline() {
       try {
         registerCurrentPanelTarget();
         const result = await performRequestInPage(req);
-        resultsConsole.innerHTML += `
-          <div style="margin-bottom: 4px; padding-bottom: 2px; border-bottom: 1px dashed var(--border);">
-            <span style="color: var(--text3); font-size: 10px;">[${escapeHtml(fuzzTarget.key)}]</span> Payload: <code style="color: var(--accent2); font-weight: bold;">${escapeHtml(currentPayload)}</code><br>
-            ↳ <span class="meta-badge s2xx">${escapeHtml(String(result?.status || 'SENT'))}</span> <code style="color: var(--accent);">${escapeHtml(req.method)}</code> ${escapeHtml(req.url)}
-          </div>`;
+
+        let shouldFilter = false;
+        if (useFfufAc && result.ok) {
+          if (baselineStatuses.has(result.status) && (baselineSizes.has(result.bodyLength) || result.bodyLength === undefined)) {
+            shouldFilter = true;
+          }
+        }
+
+        if (!shouldFilter) {
+          resultsConsole.innerHTML += `
+              <div style="margin-bottom: 4px; padding-bottom: 2px; border-bottom: 1px dashed var(--border);">
+                <span style="color: var(--text3); font-size: 10px;">[${escapeHtml(fuzzTarget.key)}]</span> Payload: <code style="color: var(--accent2); font-weight: bold;">${escapeHtml(currentPayload)}</code><br>
+                ↳ <span class="meta-badge s2xx">${escapeHtml(String(result?.status || 'SENT'))}</span> <code style="color: var(--accent);">${escapeHtml(req.method)}</code> ${escapeHtml(req.url)}
+              </div>`;
+        }
       } catch (networkErr) {
         resultsConsole.innerHTML += `<div style="color: var(--danger); margin-bottom: 4px;">❌ Drop [${escapeHtml(fuzzTarget.key)}=${escapeHtml(currentPayload)}]: ${escapeHtml(networkErr.message)}</div>`;
       }
       resultsConsole.scrollTop = resultsConsole.scrollHeight;
       totalRequests++;
-      await delay(25);
+
+      const delayAmount = fuzzDelay > 0 ? fuzzDelay : 25;
+      await delay(delayAmount);
     }
   }
 
   resultsConsole.innerHTML += `<br><span style="color: var(--accent2); font-weight: bold;">🏁 Complete. ${totalRequests} requests sent.</span><br>`;
 }
 
-// ── Wayback Machine Lookup ──
-function checkWayback() {
-  const url = document.getElementById("wayback-url-input").value;
-  const resultsContainer = document.getElementById("wayback-results");
-  if (!url) return alert("Please specify a URL");
-
-  resultsContainer.innerHTML = "Checking Internet Archive availability...";
-
-  fetch(`https://archive.org/wayback/available?url=${encodeURIComponent(url)}`)
-    .then(res => res.json())
-    .then(data => {
-      const snapshot = data.archived_snapshots?.closest;
-      if (snapshot && snapshot.available) {
-        resultsContainer.innerHTML = `
-          <div class="wb-snapshot">
-            <div>
-              <div><strong>Snapshot Found!</strong></div>
-              <a href="${snapshot.url}" target="_blank">${snapshot.url}</a>
-            </div>
-            <span class="wb-date">${snapshot.timestamp}</span>
-          </div>`;
-      } else {
-        resultsContainer.innerHTML = `
-          <div class="empty-state">
-            <div class="empty-icon">❌</div>
-            <div>No snapshots found for this URL.</div>
-          </div>`;
-      }
-    })
-    .catch(err => {
-      resultsContainer.innerHTML = `<div class="empty-state">Error querying Wayback API: ${err.message}</div>`;
-    });
-}
+// ── Wayback Machine Lookup (moved to Tools tab) ──
+// checkWayback function removed - functionality integrated into Tools tab
 
 // ── Endpoints Hunting Tab Logic ──
 function initEndpointsTab() {
@@ -1677,4 +1789,194 @@ function populateFuzzDictionary(type, interactiveUrl = "INTERACTSH_DOMAIN_HERE")
   });
 
   document.getElementById("fuzz-payloads").value = formattedPayloads.join("\n");
+}
+
+// ── Favorites (Collection) Management ──
+function loadFavorites() {
+  browser.storage.local.get(['favorites'], (data) => {
+    if (data.favorites && Array.isArray(data.favorites)) {
+      favorites = new Set(data.favorites);
+    }
+  });
+}
+
+function toggleFavorite(requestId) {
+  if (favorites.has(requestId)) {
+    favorites.delete(requestId);
+  } else {
+    favorites.add(requestId);
+  }
+  browser.storage.local.set({ favorites: Array.from(favorites) });
+  renderRequestList();
+}
+
+// ── Tools Tab Management ──
+function initToolsTab() {
+  // Wayback Machine
+  document.getElementById('tools-wayback-btn')?.addEventListener('click', checkToolsWayback);
+
+  // VirusTotal
+  document.getElementById('tools-vt-btn')?.addEventListener('click', checkToolsVirusTotal);
+
+  // IntelX
+  document.getElementById('tools-intelx-btn')?.addEventListener('click', checkToolsIntelX);
+
+  // Network Lookup
+  document.getElementById('tools-network-btn')?.addEventListener('click', checkToolsNetwork);
+}
+
+async function checkToolsWayback() {
+  if (!selectedRequest) return;
+
+  const url = selectedRequest.url;
+  const resultsDiv = document.getElementById('tools-wayback-results');
+  resultsDiv.innerHTML = '<p style="color: var(--accent);">⏳ Work in progress... please be patient.</p>';
+
+  try {
+    const domain = new URL(url).hostname;
+    const response = await fetch(
+      `https://archive.org/wayback/available?url=${encodeURIComponent(domain)}&output=json`,
+      { headers: { 'Accept': 'application/json' } }
+    );
+    const data = await response.json();
+
+    if (data.archived_snapshots?.closest) {
+      const closest = data.archived_snapshots.closest;
+      resultsDiv.innerHTML = `
+        <div style="padding: 8px; background: var(--bg3); border-radius: 4px; border: 1px solid var(--border);">
+          <p style="margin: 0 0 4px 0; color: var(--accent);">📅 Snapshot Found!</p>
+          <p style="margin: 0 0 8px 0; font-size: 11px; color: var(--text2);">Date: <strong>${closest.timestamp}</strong></p>
+          <p style="margin: 0;">
+            <a href="${closest.url}" target="_blank" style="color: var(--accent2); text-decoration: none;">View Snapshot →</a>
+          </p>
+        </div>
+      `;
+    } else {
+      resultsDiv.innerHTML = '<p style="color: var(--text3);">❌ No snapshots found for this domain</p>';
+    }
+  } catch (e) {
+    resultsDiv.innerHTML = `<p style="color: var(--danger);">Error: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+async function checkToolsVirusTotal() {
+  if (!selectedRequest) return;
+
+  const resultsDiv = document.getElementById('tools-vt-results');
+  resultsDiv.innerHTML = '<p style="color: var(--accent);">⏳ Work in progress... please be patient.</p>';
+
+  const data = await browser.storage.local.get(['api_keys']);
+  const apiKey = data.api_keys?.virustotal;
+
+  if (!apiKey) {
+    resultsDiv.innerHTML = `
+      <p style="color: var(--danger);">⚠️ API key not configured</p>
+      <p style="font-size: 11px; color: var(--text3);">Go to Settings → API Keys to add your VirusTotal API key</p>
+    `;
+    return;
+  }
+
+  const url = selectedRequest.url;
+
+  try {
+    const response = await fetch('https://www.virustotal.com/api/v3/urls', {
+      method: 'POST',
+      headers: {
+        'x-apikey': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: `url=${encodeURIComponent(url)}`
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      resultsDiv.innerHTML = `
+        <div style="padding: 8px; background: var(--bg3); border-radius: 4px; border: 1px solid var(--border);">
+          <p style="margin: 0 0 4px 0; color: var(--accent);">🔍 Submission Successful</p>
+          <p style="margin: 0 0 8px 0; font-size: 11px; color: var(--text2);">ID: <code style="color: var(--accent2);">${data.data.id}</code></p>
+          <p style="margin: 0;">
+            <a href="https://www.virustotal.com/gui/home/upload" target="_blank" style="color: var(--accent2); text-decoration: none;">View on VirusTotal →</a>
+          </p>
+        </div>
+      `;
+    } else {
+      resultsDiv.innerHTML = `<p style="color: var(--danger);">Error: ${response.statusText}</p>`;
+    }
+  } catch (e) {
+    resultsDiv.innerHTML = `<p style="color: var(--danger);">Error: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+async function checkToolsIntelX() {
+  if (!selectedRequest) return;
+
+  const resultsDiv = document.getElementById('tools-intelx-results');
+  resultsDiv.innerHTML = '<p style="color: var(--accent);">⏳ Work in progress... please be patient.</p>';
+
+  const data = await browser.storage.local.get(['api_keys']);
+  const apiKey = data.api_keys?.intelx;
+
+  if (!apiKey) {
+    resultsDiv.innerHTML = `
+      <p style="color: var(--danger);">⚠️ API key not configured</p>
+      <p style="font-size: 11px; color: var(--text3);">Go to Settings → API Keys to add your IntelX API key</p>
+    `;
+    return;
+  }
+
+  const url = selectedRequest.url;
+  const domain = new URL(url).hostname;
+
+  try {
+    const response = await fetch(`https://intelx.io/api/1/search?term=${encodeURIComponent(domain)}`, {
+      headers: {
+        'x-apikey': apiKey
+      }
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.total > 0) {
+        resultsDiv.innerHTML = `
+          <div style="padding: 8px; background: var(--bg3); border-radius: 4px; border: 1px solid var(--border);">
+            <p style="margin: 0 0 4px 0; color: var(--accent2);">💾 Found ${data.total} results</p>
+            <p style="margin: 0; font-size: 11px; color: var(--text3);">Check IntelX dashboard for details</p>
+          </div>
+        `;
+      } else {
+        resultsDiv.innerHTML = '<p style="color: var(--text3);">✅ No leaks found for this domain</p>';
+      }
+    } else {
+      resultsDiv.innerHTML = `<p style="color: var(--danger);">Error: ${response.statusText}</p>`;
+    }
+  } catch (e) {
+    resultsDiv.innerHTML = `<p style="color: var(--danger);">Error: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+async function checkToolsNetwork() {
+  if (!selectedRequest) return;
+
+  const url = selectedRequest.url;
+  const domain = new URL(url).hostname;
+  const resultsDiv = document.getElementById('tools-network-results');
+  resultsDiv.innerHTML = '<p style="color: var(--accent);">⏳ Work in progress... please be patient.</p>';
+
+  try {
+    const response = await fetch(`https://ipapi.co/${domain}/json/`);
+    const data = await response.json();
+
+    resultsDiv.innerHTML = `
+      <div style="padding: 8px; background: var(--bg3); border-radius: 4px; border: 1px solid var(--border); font-size: 11px;">
+        <p style="margin: 4px 0; color: var(--accent);"><strong>🌐 Network Information</strong></p>
+        <p style="margin: 4px 0;">IP: <code style="color: var(--accent2);">${data.ip || 'N/A'}</code></p>
+        <p style="margin: 4px 0;">ASN: <code style="color: var(--accent2);">${data.asn || 'N/A'}</code></p>
+        <p style="margin: 4px 0;">Organization: <code style="color: var(--accent2);">${data.org || 'N/A'}</code></p>
+        <p style="margin: 4px 0;">Country: <code style="color: var(--accent2);">${data.country_name || 'N/A'}</code></p>
+        <p style="margin: 4px 0;">City: <code style="color: var(--accent2);">${data.city || 'N/A'}</code></p>
+      </div>
+    `;
+  } catch (e) {
+    resultsDiv.innerHTML = `<p style="color: var(--danger);">Error: ${escapeHtml(e.message)}</p>`;
+  }
 }

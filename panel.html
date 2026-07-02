@@ -16,8 +16,12 @@
     </div>
     <div class="nav-right">
       <span id="request-count" class="badge-count">0</span>
+      <button id="req-pause-btn" class="icon-btn" title="Pause capture & intercept requests">⏸️</button>
+      <button id="req-export-btn" class="icon-btn" title="Export captured URLs">📥</button>
+      <button id="clear-all-btn" class="icon-btn danger"
+        title="Remove all (remove favs, remove requests, remove all..)">🗑️</button>
       <button id="theme-toggle" class="icon-btn" title="Toggle theme">🌙</button>
-      <button id="clear-all-btn" class="icon-btn danger" title="Clear all">🗑️</button>
+      <button id="settings-btn" class="icon-btn" title="Settings">⚙️</button>
     </div>
   </nav>
 
@@ -25,6 +29,8 @@
     <div class="toolbar">
       <div class="toolbar-left">
         <input type="text" id="req-search" placeholder="Search requests...">
+
+        <button id="collection-filter" class="filter-btn" title="Show only favorited requests">⭐ Collection</button>
 
         <select id="req-method-filter" class="filter-select multi-select" multiple size="4" title="Filter by method">
           <option value="all" selected>All Methods</option>
@@ -53,7 +59,8 @@
           <option value="all" selected>All Domains</option>
         </select>
 
-        <select id="req-extension-filter" class="filter-select multi-select" multiple size="4" title="Filter by extension">
+        <select id="req-extension-filter" class="filter-select multi-select" multiple size="4"
+          title="Filter by extension">
           <option value="all" selected>All Extensions</option>
         </select>
       </div>
@@ -66,11 +73,6 @@
         <button class="tag-filter tag-ssrf" data-tag="ssrf">SSRF</button>
         <button class="tag-filter tag-auth" data-tag="auth">AUTH</button>
         <button class="tag-filter tag-sensitive" data-tag="sensitive">Sensitive</button>
-      </div>
-      <div class="toolbar-right">
-        <button id="req-pause-btn" class="icon-btn" title="Pause capture & intercept requests">⏸️</button>
-        <button id="req-export-btn" class="icon-btn" title="Export captured URLs">📥</button>
-        <button id="req-clear-btn" class="icon-btn" title="Clear requests">🧹</button>
       </div>
     </div>
 
@@ -93,7 +95,7 @@
             <button class="detail-tab active" data-detail="request">Request</button>
             <button class="detail-tab" data-detail="response">Response</button>
             <button class="detail-tab" data-detail="attack">Attack</button>
-            <button class="detail-tab" data-detail="wayback">Wayback</button>
+            <button class="detail-tab" data-detail="tools">Tools</button>
           </div>
           <div class="detail-actions">
             <button id="copy-curl-btn" class="small-btn" title="Copy as cURL" disabled>cURL</button>
@@ -112,10 +114,15 @@
         </div>
 
         <div id="detail-attack" class="detail-content detail-fuzzer-layout">
-          <div style="background: var(--bg2); padding: 8px; border-radius: var(--radius); border: 1px solid var(--border); margin-bottom: 10px;">
+          <div
+            style="background: var(--bg2); padding: 8px; border-radius: var(--radius); border: 1px solid var(--border); margin-bottom: 10px;">
             <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-              <span style="font-family: var(--mono); font-size: 11px; color: var(--accent); font-weight: bold; min-width: 60px;">BASE URL:</span>
-              <input type="text" id="fuzz-url" class="tool-input-single" style="flex: 1; height: 26px; font-size: 11px; font-family: var(--mono); background: var(--bg3); margin: 0; padding: 4px 8px; border: 1px solid var(--border); color: var(--text); border-radius: var(--radius);" placeholder="Select a request from history...">
+              <span
+                style="font-family: var(--mono); font-size: 11px; color: var(--accent); font-weight: bold; min-width: 60px;">BASE
+                URL:</span>
+              <input type="text" id="fuzz-url" class="tool-input-single"
+                style="flex: 1; height: 26px; font-size: 11px; font-family: var(--mono); background: var(--bg3); margin: 0; padding: 4px 8px; border: 1px solid var(--border); color: var(--text); border-radius: var(--radius);"
+                placeholder="Select a request from history...">
             </div>
           </div>
 
@@ -134,23 +141,33 @@
             </div>
           </div>
 
-          <div class="attack-editors-row" style="display: flex; gap: 12px; margin-bottom: 10px; width: 100%; box-sizing: border-box;">
-            <textarea id="replay-headers" class="code-editor" style="flex: 1 1 50%; width: 0; min-height: 120px; box-sizing: border-box;" rows="6" placeholder="Headers&#10;Content-Type: application/json&#10;Authorization: Bearer xxx"></textarea>
-            <textarea id="replay-body" class="code-editor" style="flex: 1 1 50%; width: 0; min-height: 120px; box-sizing: border-box;" rows="6" placeholder="Body&#10;Request body (JSON, form data, etc.)"></textarea>
+          <div class="attack-editors-row"
+            style="display: flex; gap: 12px; margin-bottom: 10px; width: 100%; box-sizing: border-box;">
+            <textarea id="replay-headers" class="code-editor"
+              style="flex: 1 1 50%; width: 0; min-height: 120px; box-sizing: border-box;" rows="6"
+              placeholder="Headers&#10;Content-Type: application/json&#10;Authorization: Bearer xxx"></textarea>
+            <textarea id="replay-body" class="code-editor"
+              style="flex: 1 1 50%; width: 0; min-height: 120px; box-sizing: border-box;" rows="6"
+              placeholder="Body&#10;Request body (JSON, form data, etc.)"></textarea>
           </div>
 
           <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px;">
             <button id="replay-send-btn" class="primary-btn">Replay</button>
-            <button id="fuzz-start-btn" class="tool-btn primary" style="height: 26px; padding: 0 12px; font-size: 11px; font-weight: bold; white-space: nowrap; margin: 0;">Fuzz</button>
+            <button id="fuzz-start-btn" class="tool-btn primary"
+              style="height: 26px; padding: 0 12px; font-size: 11px; font-weight: bold; white-space: nowrap; margin: 0;">Fuzz</button>
             <button id="fuzz-add-param-btn" class="tool-btn">+ Add Target</button>
           </div>
 
-          <div style="background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; flex: 1; display: flex; flex-direction: column; overflow: hidden;">
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 4px; margin-bottom: 6px;">
-              <span style="font-size: 10px; font-weight: bold; color: var(--text2); text-transform: uppercase;">🎯 Targets Setup</span>
+          <div
+            style="background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+            <div
+              style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 4px; margin-bottom: 6px;">
+              <span style="font-size: 10px; font-weight: bold; color: var(--text2); text-transform: uppercase;">🎯
+                Targets Setup</span>
               <span style="font-size: 10px; color: var(--text3);">One-shot replay vs dictionary fuzz loop</span>
             </div>
-            <div class="fuzz-param-header" style="display: flex; gap: 4px; align-items: center; padding: 2px 4px; margin-bottom: 4px; font-size: 9px; font-weight: bold; color: var(--text3); text-transform: uppercase;">
+            <div class="fuzz-param-header"
+              style="display: flex; gap: 4px; align-items: center; padding: 2px 4px; margin-bottom: 4px; font-size: 9px; font-weight: bold; color: var(--text3); text-transform: uppercase;">
               <span style="width: 18px; text-align: center;">⚡</span>
               <span style="min-width: 50px; text-align: center;">Type</span>
               <span style="flex: 0.8;">Key</span>
@@ -158,44 +175,89 @@
               <span style="flex: 1.4;">Dictionary</span>
               <span style="width: 18px;"></span>
             </div>
-            <div id="fuzz-param-list-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
-              <div class="empty-hint" style="text-align: center; margin-top: 20px;">No targets identified. Choose a request from history or add your own.</div>
+            <div id="fuzz-param-list-container"
+              style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
+              <div class="empty-hint" style="text-align: center; margin-top: 20px;">No targets identified. Choose a
+                request from history or add your own.</div>
             </div>
-            <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);">
+            <div
+              style="display: flex; gap: 8px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); flex-wrap: wrap;">
               <span style="font-size: 9px; color: var(--text3); font-weight: bold; white-space: nowrap;">OAST:</span>
-              <input type="text" id="fuzz-oast-domain" value="interact.sh" style="flex: 1; height: 26px; font-size: 11px; background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 0 6px; border-radius: var(--radius); box-sizing: border-box; font-family: var(--mono); margin: 0;">
+              <input type="text" id="fuzz-oast-domain" value="interact.sh"
+                style="flex: 1; min-width: 100px; height: 26px; font-size: 11px; background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 0 6px; border-radius: var(--radius); box-sizing: border-box; font-family: var(--mono); margin: 0;">
+
+              <span
+                style="font-size: 9px; color: var(--text3); font-weight: bold; white-space: nowrap; margin-left: 10px;">DELAY
+                (ms):</span>
+              <input type="number" id="fuzz-delay" value="0" min="0"
+                style="width: 70px; height: 26px; font-size: 11px; background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 0 6px; border-radius: var(--radius); box-sizing: border-box; font-family: var(--mono); margin: 0;">
+
+              <label
+                style="display: flex; align-items: center; gap: 4px; margin-left: 10px; font-size: 9px; color: var(--text3); font-weight: bold; cursor: pointer;"
+                title="Automatically calibrate filtering options">
+                <input type="checkbox" id="fuzz-ffuf-ac" style="margin: 0;">
+                Auto-Calibrate
+              </label>
             </div>
           </div>
 
-        <div
-          style="background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; display: flex; flex-direction: column; max-height: 120px; margin-top: 10px;">
-          <span
-            style="font-size: 9px; font-weight: bold; color: var(--text3); text-transform: uppercase; margin-bottom: 2px;">Pipeline
-            Execution Console Logs</span>
-          <div id="fuzz-results"
-            style="background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; font-family: var(--mono); font-size: 11px; overflow-y: auto; min-height: 50px; color: var(--text);">
-            <div class="empty-hint">Waiting for attack sequence authorization execution...</div>
+          <div
+            style="background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; display: flex; flex-direction: column; max-height: 120px; margin-top: 10px;">
+            <span
+              style="font-size: 9px; font-weight: bold; color: var(--text3); text-transform: uppercase; margin-bottom: 2px;">Pipeline
+              Execution Console Logs</span>
+            <div id="fuzz-results"
+              style="background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; font-family: var(--mono); font-size: 11px; overflow-y: auto; min-height: 50px; color: var(--text);">
+              <div class="empty-hint">Waiting for attack sequence authorization execution...</div>
+            </div>
           </div>
+
         </div>
 
-      </div>
+        <div id="detail-tools" class="detail-content">
+          <div class="tools-container">
+            <div
+              style="background: var(--bg2); padding: 8px; border-radius: var(--radius); border: 1px solid var(--border); margin-bottom: 10px;">
+              <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <span
+                  style="font-family: var(--mono); font-size: 11px; color: var(--accent); font-weight: bold; min-width: 60px;">BASE
+                  URL:</span>
+                <input type="text" id="tools-base-url" class="tool-input-single"
+                  style="flex: 1; height: 26px; font-size: 11px; font-family: var(--mono); background: var(--bg3); margin: 0; padding: 4px 8px; border: 1px solid var(--border); color: var(--text); border-radius: var(--radius);"
+                  placeholder="Select a request from history..." readonly>
+              </div>
+            </div>
 
-      <div id="detail-wayback" class="detail-content">
-        <div class="wayback-detail-container">
-          <div class="wayback-search-bar">
-            <input type="text" id="wayback-url-input" class="tool-input-single"
-              placeholder="Enter URL to check archive history..." style="flex: 1;">
-            <button id="wayback-check-btn" class="tool-btn primary"
-              style="height: 30px; padding: 0 12px; font-size: 11px; white-space: nowrap;">🔍 Check</button>
-            <button id="wayback-open-btn" class="tool-btn"
-              style="height: 30px; padding: 0 12px; font-size: 11px; white-space: nowrap;">🌐 Open in Archive</button>
-          </div>
-          <div id="wayback-results" class="wayback-results-box">
-            <div class="empty-hint">Enter a URL to check its archive history</div>
+            <div class="tool-section">
+              <h3>📅 Wayback Machine</h3>
+              <button id="tools-wayback-btn" class="tool-btn primary"
+                style="height: 30px; padding: 0 12px; font-size: 11px; white-space: nowrap;">View Snapshots</button>
+              <div id="tools-wayback-results" class="tool-results"></div>
+            </div>
+
+            <div class="tool-section">
+              <h3>🔍 VirusTotal</h3>
+              <button id="tools-vt-btn" class="tool-btn primary"
+                style="height: 30px; padding: 0 12px; font-size: 11px; white-space: nowrap;">Scan URL</button>
+              <div id="tools-vt-results" class="tool-results"></div>
+            </div>
+
+            <div class="tool-section">
+              <h3>💾 IntelX / Leaks</h3>
+              <button id="tools-intelx-btn" class="tool-btn primary"
+                style="height: 30px; padding: 0 12px; font-size: 11px; white-space: nowrap;">Search Leaks</button>
+              <div id="tools-intelx-results" class="tool-results"></div>
+            </div>
+
+            <div class="tool-section">
+              <h3>🌐 Network Lookup (IP/ASN)</h3>
+              <button id="tools-network-btn" class="tool-btn primary"
+                style="height: 30px; padding: 0 12px; font-size: 11px; white-space: nowrap;">Lookup</button>
+              <div id="tools-network-results" class="tool-results"></div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
     </div>
   </div>
@@ -212,6 +274,7 @@
 
   <script src="tag-detection.js"></script>
   <script src="payloads.js"></script>
+  <script src="fuzzer-generator.js"></script>
   <script src="panel.js"></script>
 </body>
 
