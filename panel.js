@@ -1,11 +1,3 @@
-// ============================================================
-// Bug Extension – Panel Script (panel.js)
-// Controls UI interactivity, tab switching, encoding tools,
-// request capture visualization, replaying, and endpoint hunting.
-// ============================================================
-
-
-// At the absolute top of your panel.js file
 const port = browser.runtime.connect({ name: "bug-panel" });
 
 function getCurrentTabId() {
@@ -76,8 +68,6 @@ function performRequestInPage(req) {
     });
   });
 }
-
-// ── Shared State ──
 let capturedRequests = [];
 let filteredRequests = [];
 let selectedRequest = null;
@@ -88,25 +78,13 @@ let interceptEnabled = false;
 let useDevtoolsNetworkCapture = false;
 let favorites = new Set();
 let collectionFilterActive = false;
-
-// Load custom settings into TAG_DETECTION and NucleiFuzzDictionaries
 async function loadCustomSettings() {
   try {
-    const data = await browser.storage.local.get(['target_identifiers', 'custom_payloads', 'updated_payloads_code', 'updated_tags_code']);
-
-    if (data.updated_tags_code) {
-      try { eval(data.updated_tags_code); } catch (e) { console.error('Failed to load updated tags', e); }
-    }
-    if (data.updated_payloads_code) {
-      try { eval(data.updated_payloads_code); } catch (e) { console.error('Failed to load updated payloads', e); }
-    }
-
-    // Apply custom target identifiers to TAG_DETECTION
+    const data = await browser.storage.local.get(['target_identifiers', 'custom_payloads']);
     if (data.target_identifiers && Array.isArray(data.target_identifiers) && data.target_identifiers.length > 0) {
       if (!TAG_DETECTION.SENSITIVE_PARAMS) {
         TAG_DETECTION.SENSITIVE_PARAMS = [];
       }
-      // Add custom identifiers to the existing list (convert to lowercase for consistency)
       data.target_identifiers.forEach(identifier => {
         const normalized = identifier.trim().toLowerCase();
         if (normalized && !TAG_DETECTION.SENSITIVE_PARAMS.includes(normalized)) {
@@ -114,8 +92,6 @@ async function loadCustomSettings() {
         }
       });
     }
-
-    // Apply custom payloads to NucleiFuzzDictionaries
     if (data.custom_payloads && Array.isArray(data.custom_payloads) && data.custom_payloads.length > 0) {
       if (typeof NucleiFuzzDictionaries === 'object' && NucleiFuzzDictionaries) {
         NucleiFuzzDictionaries.custom = data.custom_payloads.filter(p => p.trim());
@@ -192,13 +168,9 @@ function initNetworkCapture() {
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
-
-// Send the active tab's ID immediately to register this exact window context
 registerCurrentPanelTarget();
 setTimeout(registerCurrentPanelTarget, 250);
 setTimeout(registerCurrentPanelTarget, 1000);
-
-// Also accept 'sent_request' echoes for immediate UI feedback
 port.onMessage.addListener((msg) => {
   if (msg.type === 'panel_registered') {
     console.log('Bug Extension panel registered for tab', msg.tabId);
@@ -221,7 +193,6 @@ port.onMessage.addListener((msg) => {
   if (msg.type === 'sent_request') {
     try {
       const req = msg.data;
-      // Convert to captured-request shape so it appears in the main requests list
       const ts = Date.now();
       const captured = {
         requestId: `sent-${ts}-${Math.floor(Math.random() * 1000)}`,
@@ -235,11 +206,7 @@ port.onMessage.addListener((msg) => {
         requestHeaders: Object.keys(req.headers || {}).map(k => ({ name: k, value: req.headers[k] })),
         statusCode: null
       };
-
-      // Add to captured requests and refresh UI
       recordCapturedRequest(captured, 'sent');
-
-      // Also write into the fuzz results console for immediate feedback
       try {
         const resultsConsole = document.getElementById('fuzz-results');
         if (resultsConsole) {
@@ -265,11 +232,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadFavorites();
   initToolsTab();
   registerCurrentPanelTarget();
-
-  // Load initial endpoint data for inline findings
   loadEndpointsFromStorage();
-
-  // Listen for storage changes to sync endpoints
   browser.storage.onChanged.addListener((changes) => {
     if (changes.endpoints) {
       loadEndpointsFromStorage();
@@ -278,23 +241,17 @@ document.addEventListener("DOMContentLoaded", () => {
       loadFavorites();
       applyRequestFilters();
     }
-    // Reload custom settings when they change
     if (changes.target_identifiers || changes.custom_payloads) {
       loadCustomSettings();
     }
   });
 });
-
-// Listen for messages from background script via Port (fallback capture + intercept)
 port.onMessage.addListener((msg) => {
   if (msg.type === 'captured_request' && !useDevtoolsNetworkCapture) {
     recordCapturedRequest(msg.data, 'webRequest');
   }
 });
-
-// ── Tab Management ──
 function initTabs() {
-  // Main Top Tabs
   const mainTabs = document.querySelectorAll("#top-nav .nav-tab");
   mainTabs.forEach(tab => {
     tab.addEventListener("click", () => {
@@ -308,8 +265,6 @@ function initTabs() {
       document.getElementById(`tab-${targetTab}`).classList.add("active");
     });
   });
-
-  // Request Detail Tabs (Right Panel)
   const detailTabs = document.querySelectorAll(".detail-tab");
   detailTabs.forEach(tab => {
     tab.addEventListener("click", () => {
@@ -324,8 +279,6 @@ function initTabs() {
     });
   });
 }
-
-// ── Theme Management ──
 function initTheme() {
   const themeBtn = document.getElementById("theme-toggle");
   if (themeBtn) {
@@ -335,16 +288,12 @@ function initTheme() {
       themeBtn.textContent = activeTheme === 'dark' ? '🌙' : '☀️';
     });
   }
-
-  // Settings Button - Opens Options Page
   const settingsBtn = document.getElementById("settings-btn");
   if (settingsBtn) {
     settingsBtn.addEventListener("click", () => {
       window.open(browser.runtime.getURL("options/options.html"), "_blank");
     });
   }
-
-  // Global Clear Button
   const clearBtn = document.getElementById("clear-all-btn");
   if (clearBtn) {
     clearBtn.addEventListener("click", () => {
@@ -354,8 +303,6 @@ function initTheme() {
       }
     });
   }
-
-  // Collection Filter Button
   const collectionBtn = document.getElementById("collection-filter");
   if (collectionBtn) {
     collectionBtn.addEventListener("click", () => {
@@ -365,8 +312,6 @@ function initTheme() {
     });
   }
 }
-
-// ── Request Capturing Tab Logic ──
 function initRequestTab() {
   document.getElementById("req-search").addEventListener("input", applyRequestFilters);
   document.getElementById("req-method-filter").addEventListener("change", applyRequestFilters);
@@ -390,11 +335,7 @@ function initRequestTab() {
     sendInterceptConfig();
   });
 
-
-
   document.getElementById("req-export-btn").addEventListener("click", exportCapturedUrls);
-
-  // Code Generation Copy Buttons
   document.getElementById("copy-curl-btn").addEventListener("click", () => {
     if (!selectedRequest) return;
     let curl = `curl -X ${selectedRequest.method} "${selectedRequest.url}"`;
@@ -438,20 +379,12 @@ function initRequestTab() {
     let js = `fetch("${selectedRequest.url}", ${JSON.stringify(opts, null, 2)})\\n  .then(res => res.text())\\n  .then(console.log);`;
     copyToClipboard(js, "Copied as fetch() call!");
   });
-
-  // Replay Send Button
   document.getElementById("replay-send-btn").addEventListener("click", executeReplay);
-
-  // Fuzzing: Wire up the interactive fuzzer component controls safely
   const addParamBtn = document.getElementById("fuzz-add-param-btn");
   const startFuzzBtn = document.getElementById("fuzz-start-btn");
 
   if (addParamBtn) addParamBtn.addEventListener("click", addNewBlankParameterRow);
   if (startFuzzBtn) startFuzzBtn.addEventListener("click", executeAttackMatrixPipeline);
-
-  // Wayback Check Button (removed - now in Tools tab)
-  // document.getElementById("wayback-check-btn")...
-  // Wayback functionality moved to Tools tab
 }
 
 function updateRequestCountBadge() {
@@ -462,8 +395,6 @@ function updateDomainFilters(urlStr) {
   try {
     const url = new URL(urlStr);
     const select = document.getElementById("req-domain-filter");
-
-    // Check if domain already exists in list
     let exists = false;
     for (let i = 0; i < select.options.length; i++) {
       if (select.options[i].value === url.origin) { exists = true; break; }
@@ -595,31 +526,22 @@ function applyRequestFilters() {
   const selectedFindings = Array.from(document.querySelectorAll("#req-finding-tags .tag-filter.active")).map(btn => btn.getAttribute('data-tag'));
 
   filteredRequests = capturedRequests.filter(r => {
-    // 1. Collection (Favorites) Filter
     if (collectionFilterActive && !favorites.has(r.requestId)) {
       return false;
     }
-
-    // 2. Core Text/Query search mapping
     const matchesQuery = r.url.toLowerCase().includes(query) ||
       String(r.statusCode || '').includes(query) ||
       r.method.toLowerCase().includes(query);
-
-    // 3. HTTP Method Filter
     let matchesMethod = true;
     if (!isFilterSelectionAll(selectedMethods)) {
       matchesMethod = selectedMethods.includes(r.method);
     }
-
-    // 4. Domain/Origin Filter
     let matchesDomain = true;
     if (!isFilterSelectionAll(selectedDomains)) {
       try {
         matchesDomain = selectedDomains.includes(new URL(r.url).origin);
       } catch { matchesDomain = false; }
     }
-
-    // 5. Status Code Range Evaluation
     let matchesStatus = true;
     if (!isFilterSelectionAll(selectedStatuses)) {
       const statusCode = r.statusCode;
@@ -634,8 +556,6 @@ function applyRequestFilters() {
         });
       }
     }
-
-    // 6. Parameter Presence Evaluation (Detects URL queries or POST/PUT bodies)
     let matchesParams = true;
     if (!isFilterSelectionAll(selectedParams)) {
       let hasParameters = false;
@@ -649,14 +569,10 @@ function applyRequestFilters() {
 
       matchesParams = selectedParams.some(paramValue => (paramValue === 'has-params' && hasParameters) || (paramValue === 'no-params' && !hasParameters));
     }
-
-    // 7. Extension Filter
     let matchesExtension = true;
     if (!isFilterSelectionAll(selectedExtensions)) {
       matchesExtension = selectedExtensions.includes(getRequestExtension(r.url));
     }
-
-    // 8. Endpoint Findings Filter
     let matchesFindings = true;
     if (selectedFindings.length > 0) {
       const findings = getRequestFindings(r);
@@ -721,13 +637,9 @@ function renderRequestList() {
 
 function selectRequestItem(req) {
   selectedRequest = req;
-
-  // Enable copy action buttons
   document.getElementById("copy-curl-btn").removeAttribute("disabled");
   document.getElementById("copy-python-btn").removeAttribute("disabled");
   document.getElementById("copy-fetch-btn").removeAttribute("disabled");
-
-  // Format Request view
   let reqText = `${req.method} ${req.url}\n`;
   if (req.requestHeaders) {
     req.requestHeaders.forEach(h => { reqText += `${h.name}: ${h.value}\n`; });
@@ -736,8 +648,6 @@ function selectRequestItem(req) {
     reqText += `\n${req.requestBody}`;
   }
   document.getElementById("request-display").textContent = reqText;
-
-  // Format Response meta & headers view
   const respMeta = document.getElementById("response-meta");
   let statusClass = "s2xx";
   if (req.statusCode >= 400) statusClass = "s4xx";
@@ -748,8 +658,6 @@ function selectRequestItem(req) {
     req.responseHeaders.forEach(h => { respText += `${h.name}: ${h.value}\n`; });
   }
   document.getElementById("response-display").textContent = respText;
-
-  // Populate Replay Panel fields
   document.getElementById("replay-method").value = req.method;
 
   let headersString = "";
@@ -758,12 +666,8 @@ function selectRequestItem(req) {
   }
   document.getElementById("replay-headers").value = headersString;
   document.getElementById("replay-body").value = req.requestBody || "";
-
-  // Populate Fuzzer input field
   setupFuzzerTabFromSelectedRequest(req);
   document.getElementById("fuzz-url").value = req.url;
-
-  // Populate Tools BASE URL field
   document.getElementById("tools-base-url").value = req.url;
 }
 
@@ -785,8 +689,6 @@ function clearRequests() {
   document.getElementById("copy-python-btn").setAttribute("disabled", "true");
   document.getElementById("copy-fetch-btn").setAttribute("disabled", "true");
 }
-
-// ── Replay Functionality ──
 async function executeReplay() {
   const method = document.getElementById("replay-method").value;
   const url = document.getElementById("fuzz-url").value.trim();
@@ -938,16 +840,8 @@ async function forwardInterceptedRequest(req) {
   }
 }
 
-
-// ── Active fuzzing ──
-// ⚡ CORE INTERACTIVE FUZZER AND TARGET PLANNER ENGINE
-// ============================================================================
-
 let currentFuzzParameters = [];
 
-/**
- * Helper: generate the <option> tags for dictionary selectors
- */
 function buildDictionaryOptionsHtml(selectedValue) {
   const presets = [
     { value: '', label: '-- None --' },
@@ -972,25 +866,18 @@ function buildDictionaryOptionsHtml(selectedValue) {
   return presets.map(p => `<option value="${p.value}" ${p.value === selectedValue ? 'selected' : ''}>${p.label}</option>`).join('');
 }
 
-/**
- * Parses query strings or payload bodies from selected requests into our checkboxes workspace
- */
 function setupFuzzerTabFromSelectedRequest(req) {
   if (!req) return;
 
   let baseSplit = req.url.split('?');
   document.getElementById("fuzz-url").value = baseSplit[0];
   currentFuzzParameters = [];
-
-  // Parse URL queries (?id=1&user=admin)
   if (baseSplit.length > 1) {
     let searchParams = new URLSearchParams(baseSplit[1]);
     for (let [key, value] of searchParams.entries()) {
       currentFuzzParameters.push({ type: 'query', key: key, value: value, active: true, dictionary: '' });
     }
   }
-
-  // Parse path-style params (/id=test or /user=alice)
   try {
     const pathSegments = new URL(baseSplit[0]).pathname.split('/');
     pathSegments.forEach(segment => {
@@ -1002,10 +889,7 @@ function setupFuzzerTabFromSelectedRequest(req) {
       }
     });
   } catch (e) {
-    // ignore bad URL parsing
   }
-
-  // Parse body properties based on Content-Type structures
   if (req.requestBody && req.requestBody.trim().length > 0) {
     let bodyStr = req.requestBody.trim();
     if (bodyStr.startsWith('{')) {
@@ -1022,8 +906,6 @@ function setupFuzzerTabFromSelectedRequest(req) {
       }
     }
   }
-
-  // Parse request headers
   if (req.requestHeaders && Array.isArray(req.requestHeaders)) {
     const headersToSkip = ['content-length', 'content-type', 'host', 'connection', 'user-agent', 'accept-encoding'];
     req.requestHeaders.forEach(h => {
@@ -1037,10 +919,6 @@ function setupFuzzerTabFromSelectedRequest(req) {
   renderFuzzerParameterMatrixRows();
 }
 
-/**
- * Draws the editable targeted input options grid tracking parameters inside memory arrays.
- * Each row: [checkbox:fuzz] [type badge] [key input] [value input] [dictionary dropdown] [✕ delete]
- */
 function renderFuzzerParameterMatrixRows() {
   const container = document.getElementById("fuzz-param-list-container");
   if (!container) return;
@@ -1076,8 +954,6 @@ function renderFuzzerParameterMatrixRows() {
       </select>
       <button class="tool-btn" id="fuzz-del-${index}" style="height: 18px; padding: 0 4px; font-size: 10px; color: var(--danger); background: transparent; border: none; margin: 0; cursor: pointer;" title="Remove target">✕</button>
     `;
-
-    // Checkbox toggles fuzz state
     row.querySelector(`#fuzz-chk-${index}`).addEventListener("change", (e) => {
       param.active = e.target.checked;
       renderFuzzerParameterMatrixRows(); // Re-render to update visual state
@@ -1134,11 +1010,6 @@ function appendQueryString(url, queryString) {
   return url.includes('?') ? `${url}&${queryString}` : `${url}?${queryString}`;
 }
 
-/**
- * Attack Loop Handler: Iterates per-parameter dictionaries and fires requests.
- * Each active parameter uses its own dictionary. Payloads are iterated for each
- * fuzzed param independently (one param fuzzed at a time, others keep original values).
- */
 async function executeAttackMatrixPipeline() {
   const baseUrl = document.getElementById("fuzz-url").value.trim();
   const oastDomain = document.getElementById("fuzz-oast-domain").value.trim() || "interact.sh";
@@ -1162,8 +1033,6 @@ async function executeAttackMatrixPipeline() {
     alert("Please check at least one parameter to fuzz and select a dictionary.");
     return;
   }
-
-  // Validate that all fuzzed params have a dictionary selected
   const missingDict = targetParameters.filter(p => !p.dictionary);
   if (missingDict.length > 0) {
     alert(`Please select a dictionary for: ${missingDict.map(p => p.key).join(', ')}`);
@@ -1195,8 +1064,6 @@ async function executeAttackMatrixPipeline() {
       resultsConsole.innerHTML += `<span style="color: var(--danger);">⚠️ Calibration failed: ${e.message}</span><br><br>`;
     }
   }
-
-  // For each active parameter, iterate its dictionary payloads
   for (const fuzzTarget of targetParameters) {
     const payloads = dictionaries[fuzzTarget.dictionary];
     if (!payloads || payloads.length === 0) {
@@ -1297,11 +1164,6 @@ async function executeAttackMatrixPipeline() {
 
   resultsConsole.innerHTML += `<br><span style="color: var(--accent2); font-weight: bold;">🏁 Complete. ${totalRequests} requests sent.</span><br>`;
 }
-
-// ── Wayback Machine Lookup (moved to Tools tab) ──
-// checkWayback function removed - functionality integrated into Tools tab
-
-// ── Endpoints Hunting Tab Logic ──
 function initEndpointsTab() {
   document.getElementById("ep-search").addEventListener("input", renderEndpointsList);
   document.getElementById("ep-domain-filter").addEventListener("change", renderEndpointsList);
@@ -1311,8 +1173,6 @@ function initEndpointsTab() {
     sensBtn.classList.toggle("active");
     renderEndpointsList();
   });
-
-  // Tag filter toggle behavior
   document.querySelectorAll("#tag-filters .tag-filter").forEach(btn => {
     btn.addEventListener("click", () => {
       btn.classList.toggle("active");
@@ -1351,8 +1211,6 @@ function renderEndpointsList() {
   const query = document.getElementById("ep-search").value.toLowerCase();
   const domain = document.getElementById("ep-domain-filter").value;
   const showOnlySensitive = document.getElementById("ep-sensitive-btn").classList.contains("active");
-
-  // Find active tag filters
   const activeTags = [];
   document.querySelectorAll("#tag-filters .tag-filter.active").forEach(btn => {
     activeTags.push(btn.getAttribute("data-tag"));
@@ -1411,8 +1269,6 @@ function renderEndpointsList() {
         <span>Last: ${new Date(ep.lastSeen).toLocaleTimeString()}</span>
       </div>
     `;
-
-    // Clicking an endpoint seeds the Replay system
     item.addEventListener("click", () => {
       document.getElementById("tab-btn-requests").click();
       document.querySelector('[data-detail="attack"]').click();
@@ -1443,8 +1299,6 @@ function clearEndpoints() {
   activeEndpoints = [];
   applyRequestFilters();
 }
-
-// ── Auxiliary Security Utilities/Tools ──
 function initToolsTab() {
   const input = document.getElementById("tool-input");
   const output = document.getElementById("tool-output");
@@ -1487,8 +1341,6 @@ function initToolsTab() {
     input.value = output.value;
     output.value = temp;
   });
-
-  // JWT Decoder
   document.getElementById("jwt-decode-btn").addEventListener("click", () => {
     const jwt = document.getElementById("jwt-input").value.trim();
     const jwtOut = document.getElementById("jwt-output");
@@ -1505,8 +1357,6 @@ function initToolsTab() {
       jwtOut.textContent = `Error Decoding JWT Parts: ${e.message}`;
     }
   });
-
-  // Crypto Hashes Generator
   document.querySelectorAll(".hash-btn").forEach(btn => {
     btn.addEventListener("click", async () => {
       const algo = btn.getAttribute("data-algo");
@@ -1531,8 +1381,6 @@ function initToolsTab() {
   document.getElementById("hash-copy-btn").addEventListener("click", () => {
     copyToClipboard(document.getElementById("hash-output").value, "Hash copied!");
   });
-
-  // Wayback Quick Checker
   document.getElementById("wb-quick-check").addEventListener("click", () => {
     const url = document.getElementById("wb-url-input").value;
     const resDiv = document.getElementById("wb-quick-result");
@@ -1551,8 +1399,6 @@ function initToolsTab() {
       .catch(e => resDiv.textContent = "Lookup error.");
   });
 }
-
-// ── Panel Resizing Handle ──
 function initResizeHandle() {
   const handle = document.getElementById("split-resize");
   const leftPanel = document.getElementById("request-list-panel");
@@ -1584,8 +1430,6 @@ function initResizeHandle() {
     }
   });
 }
-
-// ── General Utilities ──
 function copyToClipboard(text, successMessage) {
   const notify = (msg) => {
     if (msg) alert(msg);
@@ -1631,15 +1475,11 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
-
-// ── Context Menu for Encode/Decode ──
 function initContextMenu() {
   const ctxMenu = document.getElementById("panel-ctx-menu");
   if (!ctxMenu) return;
 
   let ctxTarget = null; // The element the context menu was triggered on
-
-  // Show context menu on right-click over pre and textarea elements
   document.addEventListener("contextmenu", (e) => {
     const target = e.target.closest("pre, textarea");
     if (!target) {
@@ -1649,13 +1489,9 @@ function initContextMenu() {
 
     e.preventDefault();
     ctxTarget = target;
-
-    // Position the menu
     ctxMenu.style.left = `${e.clientX}px`;
     ctxMenu.style.top = `${e.clientY}px`;
     ctxMenu.classList.remove("hidden");
-
-    // Ensure menu stays within viewport
     requestAnimationFrame(() => {
       const rect = ctxMenu.getBoundingClientRect();
       if (rect.right > window.innerWidth) {
@@ -1666,24 +1502,14 @@ function initContextMenu() {
       }
     });
   });
-
-  // Hide context menu on click outside
   document.addEventListener("click", () => {
     ctxMenu.classList.add("hidden");
   });
-
-  // Hide context menu on scroll
   document.addEventListener("scroll", () => {
     ctxMenu.classList.add("hidden");
   }, true);
 
-  /**
-   * Gets the selected text from the context target element.
-   * For <textarea>: uses selectionStart/selectionEnd.
-   * For <pre>: uses window.getSelection().
-   * Falls back to full text content if nothing is selected.
-   */
-  function getSelectedText() {
+    function getSelectedText() {
     if (!ctxTarget) return '';
     if (ctxTarget.tagName === 'TEXTAREA') {
       const start = ctxTarget.selectionStart;
@@ -1693,7 +1519,6 @@ function initContextMenu() {
       }
       return ctxTarget.value; // fallback: entire content
     }
-    // For <pre> and other elements, use window.getSelection
     const sel = window.getSelection();
     if (sel && sel.toString().trim().length > 0) {
       return sel.toString();
@@ -1701,41 +1526,30 @@ function initContextMenu() {
     return ctxTarget.textContent; // fallback: entire content
   }
 
-  /**
-   * Replaces the selected text in the context target with the transformed result.
-   * For <textarea>: replaces between selectionStart/selectionEnd.
-   * For <pre>: replaces in textContent.
-   */
-  function replaceSelectedText(transformed) {
+    function replaceSelectedText(transformed) {
     if (!ctxTarget) return;
     if (ctxTarget.tagName === 'TEXTAREA') {
       const start = ctxTarget.selectionStart;
       const end = ctxTarget.selectionEnd;
       if (start !== end) {
         ctxTarget.value = ctxTarget.value.substring(0, start) + transformed + ctxTarget.value.substring(end);
-        // Re-select the transformed text
         ctxTarget.selectionStart = start;
         ctxTarget.selectionEnd = start + transformed.length;
       } else {
         ctxTarget.value = transformed;
       }
-      // Trigger input event for any listeners
       ctxTarget.dispatchEvent(new Event('input', { bubbles: true }));
     } else {
-      // For <pre>: replace in textContent
       const sel = window.getSelection();
       if (sel && sel.toString().trim().length > 0) {
         const fullText = ctxTarget.textContent;
         const selText = sel.toString();
-        // Replace first occurrence of selected text
         ctxTarget.textContent = fullText.replace(selText, transformed);
       } else {
         ctxTarget.textContent = transformed;
       }
     }
   }
-
-  // Handle context menu item clicks
   ctxMenu.querySelectorAll(".ctx-item").forEach(item => {
     item.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1784,14 +1598,11 @@ function populateFuzzDictionary(type, interactiveUrl = "INTERACTSH_DOMAIN_HERE")
   if (!NucleiFuzzDictionaries[type]) return;
 
   const formattedPayloads = NucleiFuzzDictionaries[type].map(payload => {
-    // Dynamically replace template placeholder values if necessary
     return payload.replace(/{{marker}}/g, interactiveUrl);
   });
 
   document.getElementById("fuzz-payloads").value = formattedPayloads.join("\n");
 }
-
-// ── Favorites (Collection) Management ──
 function loadFavorites() {
   browser.storage.local.get(['favorites'], (data) => {
     if (data.favorites && Array.isArray(data.favorites)) {
@@ -1809,19 +1620,10 @@ function toggleFavorite(requestId) {
   browser.storage.local.set({ favorites: Array.from(favorites) });
   renderRequestList();
 }
-
-// ── Tools Tab Management ──
 function initToolsTab() {
-  // Wayback Machine
   document.getElementById('tools-wayback-btn')?.addEventListener('click', checkToolsWayback);
-
-  // VirusTotal
   document.getElementById('tools-vt-btn')?.addEventListener('click', checkToolsVirusTotal);
-
-  // IntelX
   document.getElementById('tools-intelx-btn')?.addEventListener('click', checkToolsIntelX);
-
-  // Network Lookup
   document.getElementById('tools-network-btn')?.addEventListener('click', checkToolsNetwork);
 }
 

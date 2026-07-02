@@ -88,15 +88,15 @@
         <p class="section-desc">Edit your dictionaries directly or fetch updates from the repository.</p>
       </div>
       
-      <label>Tag-Detection Dictionary (JavaScript code)</label>
-      <textarea id="edit-tags-code" class="settings-textarea" style="height: 150px; font-family: monospace; white-space: pre; font-size: 11px;" placeholder="var TAG_DETECTION = { ... };"></textarea>
+      <label>Tag-Detection Dictionary (JSON Configuration)</label>
+      <textarea id="edit-tags-code" class="settings-textarea" style="height: 150px; font-family: monospace; white-space: pre; font-size: 11px;" placeholder='{ "SENSITIVE_PATHS": [...] }'></textarea>
       <div style="display: flex; gap: 10px; margin-bottom: 20px;">
         <button id="save-tags-code" class="save-btn">Save Tag-Detections</button>
         <button id="btn-update-tags" class="save-btn" style="background: var(--accent2);">Fetch from Repo</button>
       </div>
 
-      <label>Payloads Dictionary (JavaScript code)</label>
-      <textarea id="edit-payloads-code" class="settings-textarea" style="height: 150px; font-family: monospace; white-space: pre; font-size: 11px;" placeholder="var NucleiFuzzDictionaries = { ... };"></textarea>
+      <label>Payloads Dictionary (JSON Configuration)</label>
+      <textarea id="edit-payloads-code" class="settings-textarea" style="height: 150px; font-family: monospace; white-space: pre; font-size: 11px;" placeholder='{ "cmdi": [...] }'></textarea>
       <div style="display: flex; gap: 10px;">
         <button id="save-payloads-code" class="save-btn">Save Payloads</button>
         <button id="btn-update-payloads" class="save-btn" style="background: var(--accent2);">Fetch from Repo</button>

@@ -1,11 +1,17 @@
-// ============================================================
-// Bug Extension – Background Script
-// Combines: request capture (rep+), endpoint hunting, context menus
-// ============================================================
-
-const connectedPanels = new Map(); // Track active devtools tabs: tabId -> port
+const connectedPanels = new Map();
 const requestMap = new Map();
 const interceptState = new Map();
+let endpoints = new Map();
+let dynamicPatterns = new Map();
+let saveTimeout = null;
+
+const CONFIG = {
+  IGNORED_EXTENSIONS: ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.woff', '.woff2', '.ttf', '.m4s', '.ico', '.eot', '.otf'],
+  get SENSITIVE_PATHS() { return TAG_DETECTION.SENSITIVE_PATHS || []; },
+  get SENSITIVE_PARAMS() { return TAG_DETECTION.SENSITIVE_PARAMS || []; },
+  get SENSITIVE_METHODS() { return TAG_DETECTION.SENSITIVE_METHODS || []; },
+  get TAG_RULES() { return TAG_DETECTION.TAG_RULES || {}; }
+};
 
 function normalizeTabId(tabId) {
   const id = Number(tabId);
@@ -22,21 +28,6 @@ function getPanelPort(tabId) {
   return id !== null ? connectedPanels.get(id) : null;
 }
 
-// ── Endpoint Hunter state ──
-let endpoints = new Map();
-let dynamicPatterns = new Map();
-let saveTimeout = null;
-
-// ── Config (from endpoint-hunter) ──
-const CONFIG = {
-  IGNORED_EXTENSIONS: ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.woff', '.woff2', '.ttf', '.m4s', '.ico', '.eot', '.otf'],
-  SENSITIVE_PATHS: TAG_DETECTION.SENSITIVE_PATHS,
-  SENSITIVE_PARAMS: TAG_DETECTION.SENSITIVE_PARAMS,
-  SENSITIVE_METHODS: TAG_DETECTION.SENSITIVE_METHODS,
-  TAG_RULES: TAG_DETECTION.TAG_RULES
-};
-
-// ── Detection functions ──
 function isInteresting(details) {
   const urlLower = (details.url || '').toLowerCase();
   const type = details.type || '';
@@ -47,18 +38,13 @@ function isInteresting(details) {
   if (urlLower.includes('.js') && (type === 'xmlhttprequest' || urlLower.includes('config') || urlLower.includes('api') || urlLower.includes('admin'))) return true;
   if (urlLower.includes('/api/') || urlLower.includes('/graphql') || urlLower.includes('/rest/')) return true;
   if (urlLower.includes('?')) return true;
-
   try {
     const parsed = new URL(details.url);
-    if (parsed.pathname.split('/').some(segment => segment.includes('=') && !segment.startsWith('='))) {
-      return true;
-    }
+    if (parsed.pathname.split('/').some(segment => segment.includes('=') && !segment.startsWith('='))) return true;
   } catch (e) {}
-
   return false;
 }
 
-// ── Endpoint persistence ──
 function saveEndpoints() {
   if (saveTimeout) clearTimeout(saveTimeout);
   saveTimeout = setTimeout(() => {
@@ -70,38 +56,28 @@ function saveEndpoints() {
   }, 400);
 }
 
-// Load persisted endpoints
-// Clear endpoints on start/close per user request
 function clearEndpointsStorage() {
   endpoints.clear();
   dynamicPatterns.clear();
   try { browser.storage.local.remove(['endpoints', 'dynamicPatterns', 'lastUpdate']); } catch (e) {}
 }
 
-// Run immediately on load so previous sessions are not restored
 clearEndpointsStorage();
 
-// Also register lifecycle hooks to clear on uninstall/start/shutdown when available
 try {
-  if (browser.runtime && browser.runtime.onInstalled) browser.runtime.onInstalled.addListener(clearEndpointsStorage);
-  if (browser.runtime && browser.runtime.onStartup) browser.runtime.onStartup.addListener(clearEndpointsStorage);
-  if (browser.runtime && browser.runtime.onSuspend) browser.runtime.onSuspend.addListener(clearEndpointsStorage);
+  if (browser.runtime?.onInstalled) browser.runtime.onInstalled.addListener(clearEndpointsStorage);
+  if (browser.runtime?.onStartup) browser.runtime.onStartup.addListener(clearEndpointsStorage);
+  if (browser.runtime?.onSuspend) browser.runtime.onSuspend.addListener(clearEndpointsStorage);
 } catch (e) {}
 
-// Still attempt to load persisted endpoints if anything remains (should be empty)
 browser.storage.local.get(['endpoints', 'dynamicPatterns']).then(data => {
-  if (data.endpoints) {
-    endpoints = new Map(data.endpoints.map(e => [e.method + ' ' + e.url, e]));
-  }
-  if (data.dynamicPatterns) {
-    dynamicPatterns = new Map(data.dynamicPatterns);
-  }
+  if (data.endpoints) endpoints = new Map(data.endpoints.map(e => [e.method + ' ' + e.url, e]));
+  if (data.dynamicPatterns) dynamicPatterns = new Map(data.dynamicPatterns);
 });
 
-// ── Request body parser ──
 function parseRequestBody(requestBody) {
   if (!requestBody) return null;
-  if (requestBody.raw && requestBody.raw.length > 0) {
+  if (requestBody.raw?.length > 0) {
     try {
       const decoder = new TextDecoder('utf-8');
       return requestBody.raw.map(bytes => bytes.bytes ? decoder.decode(bytes.bytes) : '').join('');
@@ -117,13 +93,9 @@ function parseRequestBody(requestBody) {
   return null;
 }
 
-
-// ── 1. BEFORE REQUEST LISTENER ──
 function handleBeforeRequest(details) {
   if (details.url.startsWith('moz-extension://') || details.url.startsWith('chrome-extension://')) return;
-
   if (!isTargetTab(details.tabId)) return;
-
   requestMap.set(details.requestId, {
     requestId: details.requestId,
     url: details.url,
@@ -136,15 +108,13 @@ function handleBeforeRequest(details) {
   });
 }
 
-// ── 2. HEADERS LISTENER ──
 function handleBeforeSendHeaders(details) {
   if (!isTargetTab(details.tabId)) return;
-
   const tabId = normalizeTabId(details.tabId);
   const intercept = interceptState.get(tabId);
   const req = requestMap.get(details.requestId);
 
-  if (intercept && intercept.enabled) {
+  if (intercept?.enabled) {
     const held = {
       ...(req || {}),
       requestId: details.requestId,
@@ -157,7 +127,6 @@ function handleBeforeSendHeaders(details) {
       requestHeaders: details.requestHeaders || [],
       intercepted: true
     };
-
     const targetPort = getPanelPort(tabId);
     if (targetPort) {
       try {
@@ -166,45 +135,31 @@ function handleBeforeSendHeaders(details) {
         connectedPanels.delete(tabId);
       }
     }
-
     requestMap.delete(details.requestId);
     return { cancel: true };
   }
-
-  if (req) {
-    req.requestHeaders = details.requestHeaders;
-  }
+  if (req) req.requestHeaders = details.requestHeaders;
 }
 
 function handleCompleted(details) {
   if (details.url.startsWith('moz-extension://') || details.url.startsWith('chrome-extension://')) return;
-
   if (!isTargetTab(details.tabId)) return;
 
   const tabId = normalizeTabId(details.tabId);
   const req = requestMap.get(details.requestId);
+  
   if (req) {
     req.statusCode = details.statusCode;
     req.statusLine = details.statusLine;
     req.responseHeaders = details.responseHeaders;
-
-    const message = { type: 'captured_request', data: req };
-
     const targetPort = getPanelPort(tabId);
     if (targetPort) {
-      try {
-        targetPort.postMessage(message);
-      } catch {
-        connectedPanels.delete(tabId);
-      }
+      try { targetPort.postMessage({ type: 'captured_request', data: req }); }
+      catch { connectedPanels.delete(tabId); }
     }
     requestMap.delete(details.requestId);
   }
 
-  // ── Endpoint Hunter: detect and store ──
-  if (!isTargetTab(details.tabId)) return;
-  
-  // ── Endpoint Hunter: detect and store ──
   if (!isInteresting(details)) return;
   let url;
   try { url = new URL(details.url); } catch { return; }
@@ -214,32 +169,27 @@ function handleCompleted(details) {
   const allParams = new Set();
   const currentParamValues = {};
 
-  if (endpoints.has(key)) {
-    endpoints.get(key).params.forEach(p => allParams.add(p));
-  }
+  if (endpoints.has(key)) endpoints.get(key).params.forEach(p => allParams.add(p));
   url.searchParams.forEach((v, k) => {
     allParams.add(k);
     currentParamValues[k] = v;
   });
 
-  // Also detect path parameters of the form /key=value when query strings are absent.
   url.pathname.split('/').forEach(segment => {
-    if (!segment || !segment.includes('=')) return;
+    if (!segment?.includes('=')) return;
     const [keyPart, ...rest] = segment.split('=');
     const valuePart = rest.join('=');
     if (keyPart && valuePart !== undefined) {
       allParams.add(keyPart);
-      if (!currentParamValues[keyPart]) {
-        currentParamValues[keyPart] = valuePart;
-      }
+      if (!currentParamValues[keyPart]) currentParamValues[keyPart] = valuePart;
     }
   });
 
-  if (!endpoints.has(key)) {
-    const params = Array.from(allParams);
-    const sensitive = isSensitiveEndpoint(url, details.method, params);
-    const tags = detectTags(url.href, details.method, params, details.statusCode, details.responseHeaders);
+  const params = Array.from(allParams);
+  const sensitive = isSensitiveEndpoint(url.href, details.method, params);
+  const tags = detectTags(url.href, details.method, params, details.statusCode, details.responseHeaders);
 
+  if (!endpoints.has(key)) {
     endpoints.set(key, {
       method: details.method,
       url: `${url.origin}${pathname}`,
@@ -258,12 +208,9 @@ function handleCompleted(details) {
     existing.latestValues = { ...(existing.latestValues || {}), ...currentParamValues };
     existing.lastSeen = Date.now();
     existing.status = details.statusCode;
-    Array.from(allParams).forEach(p => {
-      if (!existing.params.includes(p)) existing.params.push(p);
-    });
-    const params = existing.params;
-    existing.sensitive = isSensitiveEndpoint(url.href, details.method, params);
-    existing.tags = detectTags(url.href, details.method, params, details.statusCode, details.responseHeaders);
+    params.forEach(p => { if (!existing.params.includes(p)) existing.params.push(p); });
+    existing.sensitive = sensitive;
+    existing.tags = tags;
   }
   saveEndpoints();
 }
@@ -272,14 +219,11 @@ function handleErrorOccurred(details) {
   requestMap.delete(details.requestId);
 }
 
-
-// Register listeners
 browser.webRequest.onBeforeRequest.addListener(handleBeforeRequest, { urls: ["<all_urls>"] }, ["requestBody", "blocking"]);
 browser.webRequest.onBeforeSendHeaders.addListener(handleBeforeSendHeaders, { urls: ["<all_urls>"] }, ["requestHeaders", "blocking"]);
 browser.webRequest.onCompleted.addListener(handleCompleted, { urls: ["<all_urls>"] }, ["responseHeaders"]);
 browser.webRequest.onErrorOccurred.addListener(handleErrorOccurred, { urls: ["<all_urls>"] });
 
-// ── Port Handshake (Ensures strict mapping) ──
 browser.runtime.onConnect.addListener((port) => {
   if (port.name !== "bug-panel") return;
 
@@ -287,14 +231,11 @@ browser.runtime.onConnect.addListener((port) => {
     if (msg.type === "init_panel") {
       const tabId = normalizeTabId(msg.tabId);
       if (!tabId) return;
-
       for (const [k, v] of connectedPanels.entries()) {
         if (v === port || k === tabId) connectedPanels.delete(k);
       }
       connectedPanels.set(tabId, port);
-      try {
-        port.postMessage({ type: 'panel_registered', tabId });
-      } catch (e) {}
+      try { port.postMessage({ type: 'panel_registered', tabId }); } catch (e) {}
       return;
     }
 
@@ -305,15 +246,9 @@ browser.runtime.onConnect.addListener((port) => {
         tabId = matched ? matched[0] : null;
       }
       if (tabId) {
-        interceptState.set(tabId, {
-          enabled: Boolean(msg.enabled),
-          rule: msg.rule || null
-        });
-        try {
-          port.postMessage({ type: 'intercept_state', tabId, enabled: Boolean(msg.enabled) });
-        } catch (e) {}
+        interceptState.set(tabId, { enabled: Boolean(msg.enabled), rule: msg.rule || null });
+        try { port.postMessage({ type: 'intercept_state', tabId, enabled: Boolean(msg.enabled) }); } catch (e) {}
       }
-      return;
     }
   });
 
@@ -324,7 +259,6 @@ browser.runtime.onConnect.addListener((port) => {
   });
 });
 
-// ── Message handling ──
 browser.runtime.onMessage.addListener((msg) => {
   if (msg?.action === "clear-endpoints") {
     endpoints.clear();
@@ -333,7 +267,6 @@ browser.runtime.onMessage.addListener((msg) => {
   }
 });
 
-// ── Context menu for encoding tools ──
 const CONTEXT_MENUS = [
   { id: "bug-base64-encode", title: "Base64 Encode" },
   { id: "bug-base64-decode", title: "Base64 Decode" },
@@ -343,18 +276,9 @@ const CONTEXT_MENUS = [
 ];
 
 browser.contextMenus.removeAll().then(() => {
-  browser.contextMenus.create({
-    id: "bug-extension-parent",
-    title: "🐛 Bug Extension",
-    contexts: ["selection", "link", "page"]
-  });
+  browser.contextMenus.create({ id: "bug-extension-parent", title: "🐛 Bug Extension", contexts: ["selection", "link", "page"] });
   CONTEXT_MENUS.forEach(item => {
-    browser.contextMenus.create({
-      id: item.id,
-      parentId: "bug-extension-parent",
-      title: item.title,
-      contexts: ["selection", "link", "page"]
-    });
+    browser.contextMenus.create({ id: item.id, parentId: "bug-extension-parent", title: item.title, contexts: ["selection", "link", "page"] });
   });
 });
 
@@ -374,15 +298,11 @@ browser.contextMenus.onClicked.addListener((info, tab) => {
     case 'bug-url-decode':
       try { result = decodeURIComponent(text); } catch { result = text; }
       break;
-    case 'bug-wayback': {
-      const targetUrl = info.linkUrl || info.pageUrl || text;
-      const waybackUrl = `https://web.archive.org/web/*/${encodeURIComponent(targetUrl)}`;
-      browser.tabs.create({ url: waybackUrl });
+    case 'bug-wayback':
+      browser.tabs.create({ url: `https://web.archive.org/web/*/${encodeURIComponent(info.linkUrl || info.pageUrl || text)}` });
       return;
-    }
   }
   if (result && tab?.id) {
-    // Copy to clipboard via content script
     browser.tabs.executeScript(tab.id, {
       code: `
         navigator.clipboard.writeText(${JSON.stringify(result)}).then(() => {
@@ -397,12 +317,9 @@ browser.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-// ── Periodic cleanup ──
 setInterval(() => {
   const now = Date.now();
   for (const [id, req] of requestMap.entries()) {
     if (now - req.timeStamp > 60000) requestMap.delete(id);
   }
 }, 30000);
-
-console.log("Bug Extension background loaded.");
