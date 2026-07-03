@@ -4,6 +4,8 @@ const interceptState = new Map();
 let endpoints = new Map();
 let dynamicPatterns = new Map();
 let saveTimeout = null;
+let customHeaderConfig = { enabled: false, name: 'User-Agent', value: 'x-bug-bounty' };
+let fuzzReplayActive = false;
 
 const CONFIG = {
   IGNORED_EXTENSIONS: ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.woff', '.woff2', '.ttf', '.m4s', '.ico', '.eot', '.otf'],
@@ -114,6 +116,14 @@ function handleBeforeSendHeaders(details) {
   const intercept = interceptState.get(tabId);
   const req = requestMap.get(details.requestId);
 
+  const headers = details.requestHeaders || [];
+  const internalHeader = headers.find(h => h.name.toLowerCase() === 'x-bug-internal');
+  if (internalHeader) {
+    const cleanHeaders = headers.filter(h => h.name.toLowerCase() !== 'x-bug-internal');
+    if (req) req.requestHeaders = cleanHeaders;
+    return { requestHeaders: cleanHeaders };
+  }
+
   if (intercept?.enabled) {
     const held = {
       ...(req || {}),
@@ -124,7 +134,7 @@ function handleBeforeSendHeaders(details) {
       timeStamp: req?.timeStamp || Date.now(),
       requestBody: req?.requestBody || null,
       tabId,
-      requestHeaders: details.requestHeaders || [],
+      requestHeaders: headers,
       intercepted: true
     };
     const targetPort = getPanelPort(tabId);
@@ -138,6 +148,16 @@ function handleBeforeSendHeaders(details) {
     requestMap.delete(details.requestId);
     return { cancel: true };
   }
+
+  if (customHeaderConfig.enabled && !fuzzReplayActive) {
+    const existing = headers.find(h => h.name.toLowerCase() === customHeaderConfig.name.toLowerCase());
+    if (!existing) {
+      headers.push({ name: customHeaderConfig.name, value: customHeaderConfig.value });
+    }
+    if (req) req.requestHeaders = headers;
+    return { requestHeaders: headers };
+  }
+
   if (req) req.requestHeaders = details.requestHeaders;
 }
 
@@ -249,6 +269,35 @@ browser.runtime.onConnect.addListener((port) => {
         interceptState.set(tabId, { enabled: Boolean(msg.enabled), rule: msg.rule || null });
         try { port.postMessage({ type: 'intercept_state', tabId, enabled: Boolean(msg.enabled) }); } catch (e) {}
       }
+    }
+
+    if (msg.type === 'set_custom_header') {
+      customHeaderConfig = {
+        enabled: Boolean(msg.enabled),
+        name: msg.name || 'User-Agent',
+        value: msg.value || 'x-bug-bounty'
+      };
+    }
+
+    if (msg.type === 'set_fuzz_replay_active') {
+      fuzzReplayActive = Boolean(msg.active);
+    }
+
+    if (msg.type === 'forward_request') {
+      const { msgId, method, url, headers, body } = msg;
+      const fetchOpts = { method: method || 'GET', headers: headers || {}, credentials: 'include' };
+      if (body && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((method || 'GET').toUpperCase())) {
+        fetchOpts.body = body;
+      }
+      fetch(url, fetchOpts).then(resp => {
+        resp.text().then(() => {
+          try { port.postMessage({ type: 'forward_result', msgId, status: resp.status, statusText: resp.statusText }); } catch (e) {}
+        }).catch(() => {
+          try { port.postMessage({ type: 'forward_result', msgId, status: resp.status }); } catch (e) {}
+        });
+      }).catch(err => {
+        try { port.postMessage({ type: 'forward_result', msgId, error: err.message }); } catch (e) {}
+      });
     }
   });
 

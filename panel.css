@@ -220,3 +220,15 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .tool-results { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; margin-top: 8px; font-family: var(--mono); font-size: 11px; max-height: 200px; overflow-y: auto; min-height: 60px; }
 .tool-results .empty-hint { padding: 20px; }
 
+.req-item.dropped { opacity: .55; }
+.req-item.dropped .req-url { text-decoration: line-through; color: var(--danger); }
+.req-item.dropped .req-status { color: var(--danger); }
+.intercept-btn { background: none; border: 1px solid var(--border); color: var(--text2); font-size: 9px; padding: 2px 5px; border-radius: 3px; cursor: pointer; font-weight: 600; transition: all .12s; flex-shrink: 0; }
+.intercept-btn:hover { background: var(--bg4); color: var(--text); }
+.intercept-fwd { color: var(--accent2); border-color: var(--accent2); }
+.intercept-fwd:hover { background: var(--accent2); color: #fff; }
+.intercept-drop { color: var(--danger); border-color: var(--danger); }
+.intercept-drop:hover { background: var(--danger); color: #fff; }
+.intercept-mod { color: var(--accent); border-color: var(--accent); }
+.intercept-mod:hover { background: var(--accent); color: #fff; }
+

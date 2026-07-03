@@ -297,10 +297,8 @@ function initTheme() {
   const clearBtn = document.getElementById("clear-all-btn");
   if (clearBtn) {
     clearBtn.addEventListener("click", () => {
-      if (confirm("Clear all captured requests, collection, and endpoints?")) {
-        clearRequests();
-        clearEndpoints();
-      }
+      clearRequests();
+      clearEndpoints();
     });
   }
   const collectionBtn = document.getElementById("collection-filter");
@@ -385,6 +383,36 @@ function initRequestTab() {
 
   if (addParamBtn) addParamBtn.addEventListener("click", addNewBlankParameterRow);
   if (startFuzzBtn) startFuzzBtn.addEventListener("click", executeAttackMatrixPipeline);
+
+  const customHeaderEnable = document.getElementById("custom-header-enable");
+  const customHeaderName = document.getElementById("custom-header-name");
+  const customHeaderValue = document.getElementById("custom-header-value");
+
+  function saveCustomHeaderConfig() {
+    const config = { enabled: customHeaderEnable?.checked || false, name: customHeaderName?.value.trim() || 'User-Agent', value: customHeaderValue?.value.trim() || 'x-bug-bounty' };
+    browser.storage.local.set({ custom_header_config: config });
+    port.postMessage({ type: 'set_custom_header', ...config });
+  }
+
+  if (customHeaderEnable) {
+    customHeaderEnable.addEventListener("change", saveCustomHeaderConfig);
+  }
+  if (customHeaderName) {
+    customHeaderName.addEventListener("input", saveCustomHeaderConfig);
+  }
+  if (customHeaderValue) {
+    customHeaderValue.addEventListener("input", saveCustomHeaderConfig);
+  }
+
+  browser.storage.local.get('custom_header_config').then(data => {
+    if (data.custom_header_config) {
+      const cfg = data.custom_header_config;
+      if (customHeaderEnable) customHeaderEnable.checked = cfg.enabled;
+      if (customHeaderName) customHeaderName.value = cfg.name || 'User-Agent';
+      if (customHeaderValue) customHeaderValue.value = cfg.value || 'x-bug-bounty';
+      port.postMessage({ type: 'set_custom_header', enabled: cfg.enabled, name: cfg.name || 'User-Agent', value: cfg.value || 'x-bug-bounty' });
+    }
+  });
 }
 
 function updateRequestCountBadge() {
@@ -603,15 +631,22 @@ function renderRequestList() {
     const primaryFinding = findingChips.length ? findingChips[0] : '';
     const isFavorite = favorites.has(req.requestId);
 
-    item.className = `req-item ${selectedRequest && selectedRequest.requestId === req.requestId ? 'selected' : ''} ${isFavorite ? 'favorited' : ''} ${findingChips.length ? 'has-findings' : ''} ${primaryFinding ? `finding-${primaryFinding}` : ''}`;
+    item.className = `req-item ${selectedRequest && selectedRequest.requestId === req.requestId ? 'selected' : ''} ${isFavorite ? 'favorited' : ''} ${findingChips.length ? 'has-findings' : ''} ${primaryFinding ? `finding-${primaryFinding}` : ''} ${req.dropped ? 'dropped' : ''}`;
 
     let statusClass = "s2xx";
     if (req.statusCode >= 300 && req.statusCode < 400) statusClass = "s3xx";
     if (req.statusCode >= 400 && req.statusCode < 500) statusClass = "s4xx";
     if (req.statusCode >= 500) statusClass = "s5xx";
 
+    const interceptBtns = req.intercepted && !req.interceptProcessed
+      ? `<button class="intercept-btn intercept-fwd" data-action="fwd">Fwd</button>
+         <button class="intercept-btn intercept-drop" data-action="drop">Drop</button>
+         <button class="intercept-btn intercept-mod" data-action="mod">Mod</button>`
+      : '';
+
     item.innerHTML = `
       <button class="favorite-btn ${isFavorite ? 'active' : ''}" data-request-id="${req.requestId}" title="Add to collection">⭐</button>
+      ${interceptBtns}
       <span class="req-method ${req.method}">${req.method}</span>
       <span class="req-url" title="${escapeHtml(req.url)}">${escapeHtml(req.url)}</span>
       ${getRequestFindingBadges(req)}
@@ -623,6 +658,16 @@ function renderRequestList() {
     favBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       toggleFavorite(req.requestId);
+    });
+
+    item.querySelectorAll('.intercept-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const action = btn.dataset.action;
+        if (action === 'fwd') handleForward(req);
+        else if (action === 'drop') handleDrop(req);
+        else if (action === 'mod') handleModify(req);
+      });
     });
 
     item.addEventListener("click", () => {
@@ -648,11 +693,6 @@ function selectRequestItem(req) {
     reqText += `\n${req.requestBody}`;
   }
   document.getElementById("request-display").textContent = reqText;
-  const respMeta = document.getElementById("response-meta");
-  let statusClass = "s2xx";
-  if (req.statusCode >= 400) statusClass = "s4xx";
-  respMeta.innerHTML = `<span class="meta-badge ${statusClass}">Status: ${req.statusCode}</span>`;
-
   let respText = `${req.statusLine || ''}\n`;
   if (req.responseHeaders) {
     req.responseHeaders.forEach(h => { respText += `${h.name}: ${h.value}\n`; });
@@ -683,8 +723,6 @@ function clearRequests() {
 
   document.getElementById("request-display").textContent = "Select a request from the list";
   document.getElementById("response-display").textContent = "Select a request to see its response";
-  document.getElementById("response-meta").innerHTML = "";
-
   document.getElementById("copy-curl-btn").setAttribute("disabled", "true");
   document.getElementById("copy-python-btn").setAttribute("disabled", "true");
   document.getElementById("copy-fetch-btn").setAttribute("disabled", "true");
@@ -721,6 +759,7 @@ async function executeReplay() {
   }
 
   try {
+    port.postMessage({ type: 'set_fuzz_replay_active', active: true });
     registerCurrentPanelTarget();
     const result = await performRequestInPage(req);
     if (resultsConsole) {
@@ -733,6 +772,8 @@ async function executeReplay() {
       resultsConsole.innerHTML += `<div style="color: var(--danger);">Replay Failed: ${escapeHtml(e.message)}</div>`;
       resultsConsole.scrollTop = resultsConsole.scrollHeight;
     }
+  } finally {
+    port.postMessage({ type: 'set_fuzz_replay_active', active: false });
   }
 }
 
@@ -766,18 +807,37 @@ function hasActiveRequestFilters() {
 function exportCapturedUrls() {
   const source = hasActiveRequestFilters() ? filteredRequests : capturedRequests;
   const seen = new Set();
-  const urls = [];
+  const lines = [];
   source.forEach(r => {
     if (r.url && !seen.has(r.url)) {
       seen.add(r.url);
-      urls.push(r.url);
+      let line = `${r.method}\t${r.url}`;
+      if (r.statusCode) line += `\t${r.statusCode}`;
+      if (r.requestBody) line += `\t${r.requestBody}`;
+      lines.push(line);
     }
   });
-  if (!urls.length) {
-    return alert(hasActiveRequestFilters() ? "No matching requests to export!" : "No requests to export!");
+  if (!lines.length) {
+    const resultsConsole = document.getElementById("fuzz-results");
+    if (resultsConsole) {
+      resultsConsole.innerHTML += `<div style="color: var(--danger);">No matching requests to export.</div>`;
+      resultsConsole.scrollTop = resultsConsole.scrollHeight;
+    }
+    return;
   }
-  const text = urls.join("\n");
-  copyToClipboard(text, `Exported ${urls.length} URL${urls.length === 1 ? '' : 's'} to clipboard`);
+  const text = lines.join("\n");
+  const blob = new Blob([text], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `bug-export-${Date.now()}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+  const resultsConsole = document.getElementById("fuzz-results");
+  if (resultsConsole) {
+    resultsConsole.innerHTML += `<div style="color: var(--accent2);">📥 Exported ${lines.length} request${lines.length === 1 ? '' : 's'} to <strong>bug-export-${Date.now()}.txt</strong></div>`;
+    resultsConsole.scrollTop = resultsConsole.scrollHeight;
+  }
 }
 
 function sendInterceptConfig() {
@@ -793,13 +853,8 @@ function sendInterceptConfig() {
 function showInterceptedRequest(req) {
   const resultsConsole = document.getElementById("fuzz-results");
   if (resultsConsole) {
-    resultsConsole.innerHTML += `<div style="color: var(--warning, #ffb347); margin-top: 6px;">⛔ Intercepted: <strong>${escapeHtml(req.method)}</strong> ${escapeHtml(req.url)} <button class="small-btn intercept-forward-btn" data-request-id="${escapeHtml(req.requestId)}" style="margin-left: 8px;">Forward</button></div>`;
+    resultsConsole.innerHTML += `<div style="color: var(--warning, #ffb347); margin-top: 6px;">⛔ Intercepted: <strong>${escapeHtml(req.method)}</strong> ${escapeHtml(req.url)}</div>`;
     resultsConsole.scrollTop = resultsConsole.scrollHeight;
-
-    const forwardBtn = resultsConsole.querySelector('.intercept-forward-btn:last-of-type');
-    if (forwardBtn) {
-      forwardBtn.addEventListener('click', () => forwardInterceptedRequest(req));
-    }
   }
 
   document.querySelectorAll("#top-nav .nav-tab").forEach(t => t.classList.remove("active"));
@@ -810,14 +865,10 @@ function showInterceptedRequest(req) {
   selectRequestItem(req);
 }
 
-async function forwardInterceptedRequest(req) {
-  const headers = headersArrayToObject(req.requestHeaders);
-  const replayReq = {
-    method: req.method || 'GET',
-    url: req.url,
-    headers,
-    body: req.requestBody || null
-  };
+async function handleForward(req) {
+  const entry = capturedRequests.find(r => r.requestId === req.requestId);
+  if (entry) entry.interceptProcessed = true;
+  applyRequestFilters();
 
   const resultsConsole = document.getElementById("fuzz-results");
   if (resultsConsole) {
@@ -825,11 +876,31 @@ async function forwardInterceptedRequest(req) {
     resultsConsole.scrollTop = resultsConsole.scrollHeight;
   }
 
+  const headers = headersArrayToObject(req.requestHeaders);
+  const msgId = `fwd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
   try {
-    registerCurrentPanelTarget();
-    const result = await performRequestInPage(replayReq);
+    const result = await new Promise((resolve, reject) => {
+      function handler(msg) {
+        if (msg.type === 'forward_result' && msg.msgId === msgId) {
+          port.onMessage.removeListener(handler);
+          if (msg.error) reject(new Error(msg.error));
+          else resolve(msg);
+        }
+      }
+      port.onMessage.addListener(handler);
+      port.postMessage({ type: 'forward_request', msgId, method: req.method || 'GET', url: req.url, headers, body: req.requestBody || null });
+      setTimeout(() => { port.onMessage.removeListener(handler); reject(new Error('Forward timeout')); }, 30000);
+    });
+
+    if (entry) {
+      entry.statusCode = result.status;
+      entry.statusLine = result.statusText ? `HTTP ${result.status} ${result.statusText}` : `HTTP ${result.status}`;
+    }
+    applyRequestFilters();
+
     if (resultsConsole) {
-      resultsConsole.innerHTML += `<div style="color: var(--accent2);">↪ Forwarded — status ${escapeHtml(String(result?.status || '---'))}</div>`;
+      resultsConsole.innerHTML += `<div style="color: var(--accent2);">↪ Forwarded — status ${escapeHtml(String(result.status || '---'))}</div>`;
       resultsConsole.scrollTop = resultsConsole.scrollHeight;
     }
   } catch (e) {
@@ -837,6 +908,56 @@ async function forwardInterceptedRequest(req) {
       resultsConsole.innerHTML += `<div style="color: var(--danger);">Forward failed: ${escapeHtml(e.message)}</div>`;
       resultsConsole.scrollTop = resultsConsole.scrollHeight;
     }
+  }
+}
+
+function handleDrop(req) {
+  const entry = capturedRequests.find(r => r.requestId === req.requestId);
+  if (entry) {
+    entry.dropped = true;
+    entry.interceptProcessed = true;
+  }
+  if (selectedRequest && selectedRequest.requestId === req.requestId) {
+    selectedRequest = null;
+  }
+  applyRequestFilters();
+
+  const resultsConsole = document.getElementById("fuzz-results");
+  if (resultsConsole) {
+    resultsConsole.innerHTML += `<div style="color: var(--danger);">🗑️ Dropped: <strong>${escapeHtml(req.method)}</strong> ${escapeHtml(req.url)}</div>`;
+    resultsConsole.scrollTop = resultsConsole.scrollHeight;
+  }
+}
+
+function handleModify(req) {
+  const entry = capturedRequests.find(r => r.requestId === req.requestId);
+  if (entry) {
+    entry.dropped = true;
+    entry.interceptProcessed = true;
+  }
+  applyRequestFilters();
+
+  document.getElementById("replay-body").value = req.requestBody || "";
+  document.getElementById("replay-method").value = req.method || 'GET';
+  let headersString = "";
+  if (req.requestHeaders) {
+    req.requestHeaders.forEach(h => { headersString += `${h.name}: ${h.value}\n`; });
+  }
+  document.getElementById("replay-headers").value = headersString;
+  document.getElementById("fuzz-url").value = req.url;
+  setupFuzzerTabFromSelectedRequest(req);
+
+  document.querySelectorAll("#top-nav .nav-tab").forEach(t => t.classList.remove("active"));
+  document.getElementById("tab-btn-requests")?.classList.add("active");
+  document.querySelectorAll(".tab-panel").forEach(panel => panel.classList.remove("active"));
+  document.getElementById("tab-requests")?.classList.add("active");
+  document.querySelector('[data-detail="attack"]')?.click();
+  selectRequestItem(entry || req);
+
+  const resultsConsole = document.getElementById("fuzz-results");
+  if (resultsConsole) {
+    resultsConsole.innerHTML += `<div style="color: var(--accent);">↪ Loaded into Modify: <strong>${escapeHtml(req.method)}</strong> ${escapeHtml(req.url)} — edit and press "Replay"</div>`;
+    resultsConsole.scrollTop = resultsConsole.scrollHeight;
   }
 }
 
@@ -863,7 +984,14 @@ function buildDictionaryOptionsHtml(selectedValue) {
     { value: 'csv', label: '📊 CSV' },
     { value: 'business_logic_hpp', label: '💰 HPP' },
   ];
-  return presets.map(p => `<option value="${p.value}" ${p.value === selectedValue ? 'selected' : ''}>${p.label}</option>`).join('');
+  const generators = [
+    { value: '__numbers__', label: '🔢 Numbers' },
+    { value: '__dates__', label: '📅 Dates' },
+    { value: '__letters__', label: '🔤 Letters' },
+    { value: '__wordlist_params__', label: '📋 Common Params' },
+    { value: '__wordlist_paths__', label: '📋 Common Paths' },
+  ];
+  return presets.concat(generators).map(p => `<option value="${p.value}" ${p.value === selectedValue ? 'selected' : ''}>${p.label}</option>`).join('');
 }
 
 function setupFuzzerTabFromSelectedRequest(req) {
@@ -879,13 +1007,16 @@ function setupFuzzerTabFromSelectedRequest(req) {
     }
   }
   try {
-    const pathSegments = new URL(baseSplit[0]).pathname.split('/');
+    const pathSegments = new URL(baseSplit[0]).pathname.split('/').filter(Boolean);
     pathSegments.forEach(segment => {
-      if (!segment || !segment.includes('=')) return;
-      const [key, ...rest] = segment.split('=');
-      const value = rest.join('=');
-      if (key && value !== undefined) {
-        currentFuzzParameters.push({ type: 'path', key: key, value: value, active: true, dictionary: '' });
+      if (segment.includes('=')) {
+        const [key, ...rest] = segment.split('=');
+        const value = rest.join('=');
+        if (key && value !== undefined) {
+          currentFuzzParameters.push({ type: 'path', key: key, value: value, active: true, dictionary: '' });
+        }
+      } else {
+        currentFuzzParameters.push({ type: 'path', key: segment, value: segment, active: false, dictionary: '' });
       }
     });
   } catch (e) {
@@ -987,18 +1118,27 @@ function buildFuzzedUrl(baseUrl, runtimeValue) {
   }
 }
 
-function replacePathParamValue(url, key, newValue) {
+function replacePathSegment(url, key, newValue) {
   try {
     const u = new URL(url);
-    const segments = u.pathname.split('/').map(segment => {
-      if (!segment || !segment.includes('=')) return segment;
-      const [paramName, ...rest] = segment.split('=');
-      if (paramName === key && rest.length > 0) {
-        return `${paramName}=${newValue}`;
+    let replaced = false;
+    const segments = u.pathname.split('/').filter(Boolean);
+    const newSegments = segments.map(segment => {
+      if (replaced) return segment;
+      if (segment.includes('=')) {
+        const [paramName, ...rest] = segment.split('=');
+        if (paramName === key && rest.length > 0) {
+          replaced = true;
+          return `${paramName}=${newValue}`;
+        }
+        return segment;
+      } else if (segment === key) {
+        replaced = true;
+        return newValue;
       }
       return segment;
     });
-    u.pathname = segments.join('/');
+    u.pathname = '/' + newSegments.join('/');
     return u.toString();
   } catch (e) {
     return url;
@@ -1011,6 +1151,7 @@ function appendQueryString(url, queryString) {
 }
 
 async function executeAttackMatrixPipeline() {
+  port.postMessage({ type: 'set_fuzz_replay_active', active: true });
   const baseUrl = document.getElementById("fuzz-url").value.trim();
   const oastDomain = document.getElementById("fuzz-oast-domain").value.trim() || "interact.sh";
   const fuzzDelay = parseInt(document.getElementById("fuzz-delay").value, 10) || 0;
@@ -1064,8 +1205,27 @@ async function executeAttackMatrixPipeline() {
       resultsConsole.innerHTML += `<span style="color: var(--danger);">⚠️ Calibration failed: ${e.message}</span><br><br>`;
     }
   }
+  const fuzzerSettings = (await browser.storage.local.get('fuzzer_settings')).fuzzer_settings || {};
+
   for (const fuzzTarget of targetParameters) {
-    const payloads = dictionaries[fuzzTarget.dictionary];
+    let payloads;
+    const dict = fuzzTarget.dictionary;
+    if (dict === '__numbers__') {
+      const maxNum = fuzzerSettings.number_max || 9999;
+      const padding = fuzzerSettings.padding || 'none';
+      payloads = FuzzerGenerator.numberRange(0, maxNum, padding);
+    } else if (dict === '__dates__') {
+      payloads = FuzzerGenerator.dateRange('2020-01-01', '2025-12-31');
+    } else if (dict === '__letters__') {
+      const maxLen = fuzzerSettings.letter_max || 3;
+      payloads = FuzzerGenerator.letterRange(maxLen);
+    } else if (dict === '__wordlist_params__') {
+      payloads = FuzzerGenerator.commonWordlist('common_params');
+    } else if (dict === '__wordlist_paths__') {
+      payloads = FuzzerGenerator.commonWordlist('common_paths');
+    } else {
+      payloads = dictionaries[dict];
+    }
     if (!payloads || payloads.length === 0) {
       resultsConsole.innerHTML += `<div style="color: var(--danger);">No payloads found for dictionary: ${escapeHtml(String(fuzzTarget.dictionary))}</div>`;
       continue;
@@ -1096,7 +1256,7 @@ async function executeAttackMatrixPipeline() {
         if (p.type === 'url') {
           executionUrl = buildFuzzedUrl(baseUrl, runtimeValue);
         } else if (p.type === 'path') {
-          executionUrl = replacePathParamValue(executionUrl, p.key, runtimeValue);
+          executionUrl = replacePathSegment(executionUrl, p.key, runtimeValue);
         } else if (p.type === 'query') {
           queryBuilder.append(p.key, runtimeValue);
         } else if (p.type === 'header') {
@@ -1163,6 +1323,7 @@ async function executeAttackMatrixPipeline() {
   }
 
   resultsConsole.innerHTML += `<br><span style="color: var(--accent2); font-weight: bold;">🏁 Complete. ${totalRequests} requests sent.</span><br>`;
+  port.postMessage({ type: 'set_fuzz_replay_active', active: false });
 }
 function initEndpointsTab() {
   document.getElementById("ep-search").addEventListener("input", renderEndpointsList);
@@ -1430,11 +1591,15 @@ function initResizeHandle() {
     }
   });
 }
-function copyToClipboard(text, successMessage) {
-  const notify = (msg) => {
-    if (msg) alert(msg);
-  };
+function notifyConsole(msg) {
+  const resultsConsole = document.getElementById("fuzz-results");
+  if (resultsConsole && msg) {
+    resultsConsole.innerHTML += `<div style="color: var(--accent2);">📋 ${msg}</div>`;
+    resultsConsole.scrollTop = resultsConsole.scrollHeight;
+  }
+}
 
+function copyToClipboard(text, successMessage) {
   const fallbackCopy = () => {
     const ta = document.createElement('textarea');
     ta.value = text;
@@ -1446,18 +1611,18 @@ function copyToClipboard(text, successMessage) {
     try {
       const ok = document.execCommand('copy');
       document.body.removeChild(ta);
-      if (ok) notify(successMessage || "Copied to clipboard!");
-      else notify("Copy failed — select and copy manually.");
+      if (ok) notifyConsole(successMessage || "Copied to clipboard!");
+      else notifyConsole("Copy failed - select and copy manually.");
     } catch (err) {
       document.body.removeChild(ta);
       console.error("Clipboard copy failed", err);
-      notify("Copy failed — select and copy manually.");
+      notifyConsole("Copy failed - select and copy manually.");
     }
   };
 
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text).then(() => {
-      notify(successMessage || "Copied to clipboard!");
+      notifyConsole(successMessage || "Copied to clipboard!");
     }).catch(err => {
       console.warn("Clipboard API failed, using fallback", err);
       fallbackCopy();
@@ -1621,10 +1786,48 @@ function toggleFavorite(requestId) {
   renderRequestList();
 }
 function initToolsTab() {
+  document.getElementById('tools-subdomains-btn')?.addEventListener('click', checkToolsSubdomains);
   document.getElementById('tools-wayback-btn')?.addEventListener('click', checkToolsWayback);
   document.getElementById('tools-vt-btn')?.addEventListener('click', checkToolsVirusTotal);
   document.getElementById('tools-intelx-btn')?.addEventListener('click', checkToolsIntelX);
   document.getElementById('tools-network-btn')?.addEventListener('click', checkToolsNetwork);
+}
+
+async function checkToolsSubdomains() {
+  if (!selectedRequest) return;
+  const resultsDiv = document.getElementById('tools-subdomains-results');
+  resultsDiv.innerHTML = '<p style="color: var(--accent);">⏳ Enumerating subdomains...</p>';
+
+  try {
+    const domain = new URL(selectedRequest.url).hostname;
+    const q = `%.${domain}`;
+    const resp = await fetch(`https://crt.sh/?q=${encodeURIComponent(q)}&output=json`);
+    if (!resp.ok) { resultsDiv.innerHTML = `<p style="color: var(--danger);">HTTP ${resp.status}</p>`; return; }
+
+    const certs = await resp.json();
+    const seen = new Set();
+    const subs = [];
+    for (const cert of certs) {
+      const names = (cert.name_value || '').split('\n');
+      for (const n of names) {
+        const cleaned = n.replace(/^\*\./, '').trim();
+        if (cleaned && !seen.has(cleaned)) {
+          seen.add(cleaned);
+          subs.push(cleaned);
+        }
+      }
+    }
+    subs.sort();
+
+    if (subs.length === 0) {
+      resultsDiv.innerHTML = '<p style="color: var(--text3);">No subdomains found.</p>';
+      return;
+    }
+
+    resultsDiv.innerHTML = `<p style="color: var(--accent2); font-size: 11px; margin: 0 0 6px 0;">Found ${subs.length} subdomains</p><div style="display: flex; flex-direction: column; gap: 3px; max-height: 240px; overflow-y: auto;">${subs.map(s => `<a href="https://${escapeHtml(s)}" target="_blank" rel="noopener" style="color: var(--accent); text-decoration: none; font-family: var(--mono); font-size: 11px; padding: 2px 4px; border-radius: 3px;">${escapeHtml(s)}</a>`).join('')}</div>`;
+  } catch (e) {
+    resultsDiv.innerHTML = `<p style="color: var(--danger);">Error: ${escapeHtml(e.message)}</p>`;
+  }
 }
 
 async function checkToolsWayback() {
