@@ -1,64 +1,75 @@
-# Bug Extension – Development & Debugging Guide
+# Bug Extension
 
-This repository contains the full source code for **Bug Extension**, an all-in-one security testing toolkit built as a Firefox Developer Tools panel extension. It includes real-time request capturing, automated endpoint and parameter vulnerability hunting, an active HTTP Request Replay engine, and multiple diagnostic encoding tools.
+All-in-one security testing toolkit for Firefox DevTools. Captures requests, fuzzes parameters, tags endpoints, decodes payloads, and compares responses.
 
----
+## Features
 
-## Extension File Structure
+**Capture & Intercept**
+- Real-time HTTP request capture via `webRequest` API
+- Request interception with Forward/Drop/Modify controls
+- Status code, method, domain, parameter, and extension filters
+- Favorites/collection system
+- Finding tag chips (XSS, SQLi, LFI, IDOR, RCE, SSRF, Auth, Sensitive, Interesting)
 
-Ensure all the following extension files are organized in the same root directory before loading:
+**Replay & Fuzz**
+- HTTP request replay with editable method/URL/headers/body
+- Parameter-based fuzzing with per-target config (preset, custom, numbers, dates, letters, wordlists)
+- 16 attack presets: cmdi, lfi, xss, sqli, nosqli, ssrf, ssti, xxe, open_redirect, crlf, prototype_pollution, rce_deserialization, idor, hidden_params, csv, business_logic_hpp
+- {{marker}} substitution with OAST domain for OOB detection
+- FFUF-style auto-calibrate filtering
+- Configurable delay between requests
 
-*   `manifest.json` – The extension's configuration blueprint defining permissions, service scripts, and entry points.
-*   `background.js` – Handles persistent background operations, network request capturing (`webRequest`), storage, and context menus.
-*   `devtools.html` / `devtools.js` – Registers the custom panel ("Bug Extension") inside Firefox's native Developer Tools architecture.
-*   `panel.html` – The core structure and user interface markup for the custom extension tab.
-*   `panel.css` – Contains the comprehensive style architecture supporting the dark-first UI theme layout.
-*   `panel.js` – Contains the core interactivity, message passing routing, script generation templates, and data rendering mechanics.
+**Quick Fuzz ⚡** — One-click fuzzing from any request item. Click ⚡ → pick preset (XSS, SQLi, LFI, CMDi, SSRF, SSTI, XXE, Redirect) → automatically loads and fires.
 
----
+**OOB Auto-Probe 📡** — After every fuzz session, if a non-default OAST domain is set, automatically sends `nslookup`, `curl`, `ping`, `wget` probes through each target parameter for blind detection.
 
-## How to Load into Firefox for Debugging
+**Auto-Tagging**
+- Tags: xss, sqli, lfi, idor, rce, ssrf, auth, sensitive
+- **Keyword Highlighter 🔥** — auto-flags requests with interesting patterns (403/401/500, `/api`, `/admin`, `/debug`, `?debug=`, `?file=`, `?cmd=`, debug headers like `x-debug-`, `via:`, `x-forwarded-`)
+- Endpoint storage with deduplication and metadata
 
-Since this extension hooks directly into the Firefox Developer Tools panel subsystem (`devtools_page`), it must be loaded as a temporary add-on for local debugging:
+**Tools**
+- **Comparer 📐** — Side-by-side LCS line diff with +/-/= counts and color highlighting
+- **Hex / Multi-Decoder 🔬** — Live-updating hex ladder (offset:hex:ASCII) + base64 enc/dec, URL enc/dec, HTML entities
+- Subdomain enumeration via crt.sh
+- Wayback Machine snapshot lookup
+- VirusTotal URL scan
+- IntelX leak search
+- Network (IP/ASN) lookup
+- Context menu: base64/URL encode/decode, hex encode/decode, copy
 
-1. Open **Firefox**.
-2. In the address bar, type `about:debugging` and press **Enter**.
-3. Click on **"This Firefox"** (or *"This Nightly"* / *"This Developer Edition"*) in the left-hand sidebar menu.
-4. Click the **"Load Temporary Add-on..."** button.
-5. In the file picker dialog, navigate to your extension's project folder.
-6. Select **any file** inside the root directory (such as `manifest.json`) and click **Open**.
+**Endpoint Discovery**
+- Automatic endpoint extraction from captured requests
+- Sensitive endpoint detection by path/param/method patterns
+- Tag-based filtering
+- Export endpoints to JSON
 
-The extension is now loaded temporarily! It will remain active until you completely restart Firefox or click the "Remove" button on the `about:debugging` page.
+## File Structure
 
----
+- `manifest.json` — Extension config, permissions, and entry points
+- `background.js` — Background script: webRequest capture, context menus, storage
+- `devtools.html` / `devtools.js` — DevTools panel registration
+- `panel.html` — UI markup
+- `panel.css` — CSS (dark/light theme)
+- `panel.js` — Panel logic: capture list, fuzzer, tools, comparer, decoder
+- `tag-detection.js` — Tag detection logic and data
+- `tag-detection.json` — Tag detection rules (paths, params, methods by tag)
+- `payloads.js` — Fuzz dictionary loader (custom storage → bundled JSON)
+- `payloads.json` — Fuzz payloads by attack type
+- `fuzzer-generator.js` — Dynamic payload generators (letters, numbers, dates, wordlists)
+- `options/` — Extension settings page
 
-## How to View and Use the Extension
+## Loading into Firefox
 
-Because this toolkit is a DevTools add-on rather than a standard toolbar popup, you access it via the browser's inspection console:
+1. Open `about:debugging` → This Firefox
+2. Click "Load Temporary Add-on..."
+3. Select `manifest.json`
 
-1. Navigate to any web page you want to analyze (e.g., `https://example.com`).
-2. Open the Firefox Developer Tools by pressing `F12` (or `Ctrl+Shift+I` on Windows/Linux, `Cmd+Opt+I` on macOS).
-3. Look at the tab menu rows on the top of the DevTools panel (next to *Inspector*, *Console*, *Network*, etc.).
-4. Click on the **"Bug Extension"** tab.
-5. Browse your target website normally. The **Requests** tab will dynamically record raw HTTP packets via `background.js` and display them live in your custom UI.
+The panel appears in DevTools as "Bug Extension" tab after you inspect a page.
 
----
+## Debugging
 
-## How to Debug the Extension Code Itself
-
-When developing, you may need to inspect errors, check `console.log` messages, or place debugger breakpoints inside your extension components. Firefox isolates these processes into separate environments:
-
-### 1. Debugging `background.js`
-* Go back to the `about:debugging` page where you loaded the extension.
-* Locate **Bug Extension** under the temporary extensions list.
-* Click the **"Inspect"** button next to it.
-* A new dedicated Developer Tools window will open. This console handles all logs, storage inspections (`browser.storage.local`), and network intercepts managed by the persistent background loop.
-
-### 2. Debugging `panel.js` or UI Elements
-* Open your extension's **Bug Extension** panel inside the normal web page DevTools tray.
-* Right-click **anywhere inside the custom panel UI layout** and select **"Inspect Element (Q)"**.
-* A *second* nested DevTools window will open. This window lets you inspect your extension's layout elements (`panel.html`), view layout rule behaviors (`panel.css`), and debug panel interactions (`panel.js`).
-
-### 3. Applying Changes
-* Firefox tracks local directory code modifications in real-time. If you edit `panel.js` or `panel.css`, simply **close and reopen your target web page's DevTools assembly** to re-render changes.
-* If you edit structural hooks inside `background.js` or `manifest.json`, return to `about:debugging` and click the **"Reload"** button on your extension entry.
+- **background.js**: Inspect from `about:debugging` → extension entry → "Inspect"
+- **panel.js/UI**: Right-click inside the Bug Extension panel → "Inspect Element"
+- After editing `panel.js` or `panel.css`, close and reopen DevTools
+- After editing `background.js` or `manifest.json`, reload from `about:debugging`

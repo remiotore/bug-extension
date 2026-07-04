@@ -1,18 +1,4 @@
-var TAG_DETECTION = {
-  SENSITIVE_PATHS: [],
-  SENSITIVE_PARAMS: [],
-  SENSITIVE_METHODS: [],
-  TAG_RULES: {
-    xss: { params: [], methods: [] },
-    sqli: { params: [], methods: [] },
-    lfi: { params: [], paths: [], methods: [] },
-    idor: { params: [], methods: [] },
-    rce: { params: [], methods: [] },
-    ssrf: { params: [], methods: [] },
-    auth: { paths: [], methods: [], params: [] }
-  },
-  TAG_ICONS: {}
-};
+var TAG_DETECTION = {};
 
 async function initTagDetection() {
   try {
@@ -76,6 +62,7 @@ function extractRequestParams(urlStr, body) {
 }
 
 function isSensitiveEndpoint(url, method, params) {
+  if (!TAG_DETECTION.SENSITIVE_METHODS) return false;
   let urlObj;
   try { urlObj = new URL(url); } catch { return false; }
   const path = urlObj.pathname.toLowerCase();
@@ -87,6 +74,7 @@ function isSensitiveEndpoint(url, method, params) {
 }
 
 function detectTags(url, method, params = [], status = 0, responseHeaders = []) {
+  if (!TAG_DETECTION.TAG_RULES) return {};
   let urlObj;
   try { urlObj = new URL(url); } catch { return {}; }
   const path = urlObj.pathname.toLowerCase();

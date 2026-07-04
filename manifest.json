@@ -17,7 +17,6 @@
     "storage",
     "tabs",
     "clipboardWrite",
-    "contextMenus",
     "activeTab"
   ],
   "devtools_page": "devtools.html",

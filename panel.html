@@ -267,6 +267,26 @@
                 style="height: 30px; padding: 0 12px; font-size: 11px; white-space: nowrap;">Lookup</button>
               <div id="tools-network-results" class="tool-results"></div>
             </div>
+
+            <div class="tool-section">
+              <h3>📐 Comparer</h3>
+              <div style="display:flex;gap:8px;margin-bottom:8px;">
+                <textarea id="cmp-left" class="code-editor" style="flex:1;min-height:120px;resize:vertical;" placeholder="&#10;Response A&#10;Paste or type here..."></textarea>
+                <textarea id="cmp-right" class="code-editor" style="flex:1;min-height:120px;resize:vertical;" placeholder="&#10;Response B&#10;Paste or type here..."></textarea>
+              </div>
+              <div style="display:flex;gap:4px;margin-bottom:8px;">
+                <button id="cmp-run-btn" class="tool-btn primary">Compare</button>
+                <button id="cmp-swap" class="tool-btn">⇄ Swap</button>
+                <button id="cmp-clear" class="tool-btn">Clear</button>
+              </div>
+              <div id="cmp-results" class="tool-results" style="max-height:300px;font-family:var(--mono);font-size:11px;line-height:1.6;white-space:pre;overflow:auto;"></div>
+            </div>
+
+            <div class="tool-section">
+              <h3>🔬 Hex / Multi-Decoder</h3>
+              <textarea id="dec-input" class="code-editor" style="width:100%;min-height:80px;box-sizing:border-box;" placeholder="Paste text here for live decoding..."></textarea>
+              <div id="dec-output" style="margin-top:6px;font-family:var(--mono);font-size:11px;line-height:1.6;"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -274,15 +294,6 @@
     </div>
   </div>
 
-  <div id="panel-ctx-menu" class="ctx-menu hidden">
-    <div class="ctx-item" data-action="ctx-base64-encode">Base64 Encode</div>
-    <div class="ctx-item" data-action="ctx-base64-decode">Base64 Decode</div>
-    <div class="ctx-sep"></div>
-    <div class="ctx-item" data-action="ctx-url-encode">URL Encode</div>
-    <div class="ctx-item" data-action="ctx-url-decode">URL Decode</div>
-    <div class="ctx-sep"></div>
-    <div class="ctx-item" data-action="ctx-copy">Copy</div>
-  </div>
 
   <script src="tag-detection.js"></script>
   <script src="payloads.js"></script>

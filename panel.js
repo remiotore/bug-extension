@@ -22,10 +22,6 @@ function headersArrayToObject(headers) {
   return out;
 }
 
-function headersObjectToArray(headers) {
-  return Object.entries(headers || {}).map(([name, value]) => ({ name, value: String(value) }));
-}
-
 function performRequestInPage(req) {
   return new Promise((resolve, reject) => {
     if (!browser.devtools?.inspectedWindow?.eval) {
@@ -228,7 +224,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initRequestTab();
   initNetworkCapture();
   initResizeHandle();
-  initContextMenu();
+
   loadFavorites();
   initToolsTab();
   registerCurrentPanelTarget();
@@ -473,6 +469,23 @@ function getEndpointMetadataForRequest(req) {
   }
 }
 
+function detectInterestingPatterns(req) {
+  if (!req) return false;
+  const INTERESTING_STATUSES = new Set([403, 401, 500, 502, 503, 301, 302, 307, 308]);
+  const INTERESTING_URL = [/\/api\b/i, /\/admin\b/i, /\/debug\b/i, /\/swagger/i, /\/graphql/i, /\/console/i, /\/actuator\b/i, /\?debug=/, /\?source=/, /\?file=/, /\?exec=/, /\?cmd=/, /\?code=/];
+  const INTERESTING_HEADERS = ['x-debug-', 'x-error-', 'x-powered-by', 'x-runtime', 'x-sentry', 'x-amzn-', 'x-aspnet-', 'x-rack-', 'via:', 'x-forwarded-'];
+
+  if (INTERESTING_STATUSES.has(req.statusCode)) return true;
+  if (INTERESTING_URL.some(r => r.test(req.url))) return true;
+  if (req.responseHeaders) {
+    for (const h of req.responseHeaders) {
+      const name = (h.name || '').toLowerCase();
+      if (INTERESTING_HEADERS.some(p => name.includes(p))) return true;
+    }
+  }
+  return false;
+}
+
 function getRequestFindings(req) {
   if (!req) return [];
 
@@ -486,15 +499,14 @@ function getRequestFindings(req) {
   );
 
   const endpoint = getEndpointMetadataForRequest(req);
-  if (!endpoint) return localFindings;
-
   const merged = new Set(localFindings);
-  if (endpoint.sensitive) merged.add('sensitive');
-  if (endpoint.tags) {
+  if (endpoint && endpoint.sensitive) merged.add('sensitive');
+  if (endpoint && endpoint.tags) {
     Object.entries(endpoint.tags).forEach(([tag, value]) => {
       if (value) merged.add(tag);
     });
   }
+  if (detectInterestingPatterns(req)) merged.add('interesting');
   return Array.from(merged);
 }
 
@@ -652,6 +664,14 @@ function renderRequestList() {
       ${getRequestFindingBadges(req)}
       <span class="req-status ${statusClass}">${req.statusCode || '---'}</span>
       <span class="req-type">${escapeHtml(req.type || '')}</span>
+      <span style="position:relative;display:inline-flex;flex-shrink:0;">
+        <button class="quick-fuzz-btn" title="Quick Fuzz">⚡</button>
+        <div class="quick-fuzz-dropdown">
+          <div data-preset="xss">XSS</div><div data-preset="sqli">SQLi</div><div data-preset="lfi">LFI</div>
+          <div data-preset="cmdi">CMDi</div><div data-preset="ssrf">SSRF</div><div data-preset="ssti">SSTI</div>
+          <div data-preset="xxe">XXE</div><div data-preset="open_redirect">Redirect</div>
+        </div>
+      </span>
     `;
 
     const favBtn = item.querySelector('.favorite-btn');
@@ -674,6 +694,21 @@ function renderRequestList() {
       document.querySelectorAll(".req-item").forEach(i => i.classList.remove("selected"));
       item.classList.add("selected");
       selectRequestItem(req);
+    });
+
+    const qfBtn = item.querySelector('.quick-fuzz-btn');
+    const qfDrop = item.querySelector('.quick-fuzz-dropdown');
+    qfBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      qfDrop.classList.toggle('show');
+    });
+    qfDrop.querySelectorAll('div').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        qfDrop.classList.remove('show');
+        qfBtn.textContent = '⏳';
+        quickFuzz(req, el.dataset.preset);
+      });
     });
 
     container.appendChild(item);
@@ -1032,6 +1067,24 @@ function addNewBlankParameterRow() {
   selectedFuzzParamIndex = currentFuzzParameters.length - 1;
   renderFuzzerParamList();
   syncRequestFromParams();
+}
+
+function quickFuzz(req, preset) {
+  if (!req) return;
+  selectRequestItem(req);
+  document.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.detail-content').forEach(c => c.classList.remove('active'));
+  const attackTab = document.querySelector('[data-detail="attack"]');
+  const attackContent = document.getElementById('detail-attack');
+  if (attackTab) attackTab.classList.add('active');
+  if (attackContent) attackContent.classList.add('active');
+  currentFuzzParameters.forEach(p => { p.fuzzMode = 'preset'; p.fuzzPreset = preset; });
+  renderFuzzerParamList();
+  setTimeout(() => {
+    document.getElementById('fuzz-start-btn')?.click();
+    const qfBtn = document.querySelector('.quick-fuzz-btn');
+    if (qfBtn) qfBtn.textContent = '⚡';
+  }, 200);
 }
 
 function renderFuzzerParamList() {
@@ -1474,6 +1527,42 @@ async function executeAttackMatrixPipeline() {
     }
   }
 
+  if (oastDomain && oastDomain !== 'interact.sh') {
+    resultsConsole.innerHTML += `<div style="color: var(--accent3); font-weight: bold; margin: 8px 0 4px;">📡 OOB probes → ${escapeHtml(oastDomain)}</div>`;
+    const oobPayloads = [`nslookup ${oastDomain}`, `curl ${oastDomain}`, `ping -c 1 ${oastDomain}`, `wget ${oastDomain}`];
+    for (const fuzzTarget of targetParameters) {
+      for (const oobRaw of oobPayloads) {
+        let queryBuilder = new URLSearchParams();
+        let formBodyBuilder = new URLSearchParams();
+        let jsonBodyObj = {};
+        let hasBody = false;
+        let bodyType = 'form';
+        let executionUrl = baseUrl;
+        let fetchOptions = { method: 'GET', cache: 'no-store' };
+        currentFuzzParameters.forEach(p => {
+          const v = (p === fuzzTarget) ? oobRaw : p.value;
+          if (p.type === 'url') executionUrl = buildFuzzedUrl(baseUrl, v);
+          else if (p.type === 'path') executionUrl = replacePathSegment(executionUrl, p.key, v);
+          else if (p.type === 'query') queryBuilder.append(p.key, v);
+          else if (p.type === 'header') { fetchOptions.headers = fetchOptions.headers || {}; fetchOptions.headers[p.key] = v; }
+          else if (p.type === 'body-form') { formBodyBuilder.append(p.key, v); hasBody = true; }
+          else if (p.type === 'body-json') { jsonBodyObj[p.key] = v; hasBody = true; bodyType = 'json'; }
+        });
+        executionUrl = appendQueryString(executionUrl, queryBuilder.toString());
+        if (hasBody && bodyType === 'form' && formBodyBuilder.toString()) { fetchOptions.method = 'POST'; fetchOptions.headers = { 'Content-Type': 'application/x-www-form-urlencoded' }; fetchOptions.body = formBodyBuilder.toString(); }
+        else if (hasBody && bodyType === 'json' && Object.keys(jsonBodyObj).length > 0) { fetchOptions.method = 'POST'; fetchOptions.headers = { 'Content-Type': 'application/json' }; fetchOptions.body = JSON.stringify(jsonBodyObj); }
+        try {
+          registerCurrentPanelTarget();
+          const result = await performRequestInPage({ method: (fetchOptions.method || 'GET').toUpperCase(), url: executionUrl, headers: fetchOptions.headers || {}, body: fetchOptions.body || null });
+          resultsConsole.innerHTML += `<div style="margin-bottom:2px;color:var(--text3);font-size:10px;">📡 [${escapeHtml(fuzzTarget.key)}] <code style="color:var(--accent3)">${escapeHtml(oobRaw)}</code> → ${result.status || 'SENT'}</div>`;
+        } catch (e) {
+          resultsConsole.innerHTML += `<div style="color:var(--danger);font-size:10px;">📡 [${escapeHtml(fuzzTarget.key)}] ${escapeHtml(oobRaw)}: ${escapeHtml(e.message)}</div>`;
+        }
+        await delay(25);
+      }
+    }
+  }
+
   resultsConsole.innerHTML += `<br><span style="color: var(--accent2); font-weight: bold;">🏁 Complete. ${totalRequests} requests sent.</span><br>`;
   port.postMessage({ type: 'set_fuzz_replay_active', active: false });
 }
@@ -1792,124 +1881,6 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
-function initContextMenu() {
-  const ctxMenu = document.getElementById("panel-ctx-menu");
-  if (!ctxMenu) return;
-
-  let ctxTarget = null; // The element the context menu was triggered on
-  document.addEventListener("contextmenu", (e) => {
-    const target = e.target.closest("pre, textarea");
-    if (!target) {
-      ctxMenu.classList.add("hidden");
-      return;
-    }
-
-    e.preventDefault();
-    ctxTarget = target;
-    ctxMenu.style.left = `${e.clientX}px`;
-    ctxMenu.style.top = `${e.clientY}px`;
-    ctxMenu.classList.remove("hidden");
-    requestAnimationFrame(() => {
-      const rect = ctxMenu.getBoundingClientRect();
-      if (rect.right > window.innerWidth) {
-        ctxMenu.style.left = `${window.innerWidth - rect.width - 4}px`;
-      }
-      if (rect.bottom > window.innerHeight) {
-        ctxMenu.style.top = `${window.innerHeight - rect.height - 4}px`;
-      }
-    });
-  });
-  document.addEventListener("click", () => {
-    ctxMenu.classList.add("hidden");
-  });
-  document.addEventListener("scroll", () => {
-    ctxMenu.classList.add("hidden");
-  }, true);
-
-    function getSelectedText() {
-    if (!ctxTarget) return '';
-    if (ctxTarget.tagName === 'TEXTAREA') {
-      const start = ctxTarget.selectionStart;
-      const end = ctxTarget.selectionEnd;
-      if (start !== end) {
-        return ctxTarget.value.substring(start, end);
-      }
-      return ctxTarget.value; // fallback: entire content
-    }
-    const sel = window.getSelection();
-    if (sel && sel.toString().trim().length > 0) {
-      return sel.toString();
-    }
-    return ctxTarget.textContent; // fallback: entire content
-  }
-
-    function replaceSelectedText(transformed) {
-    if (!ctxTarget) return;
-    if (ctxTarget.tagName === 'TEXTAREA') {
-      const start = ctxTarget.selectionStart;
-      const end = ctxTarget.selectionEnd;
-      if (start !== end) {
-        ctxTarget.value = ctxTarget.value.substring(0, start) + transformed + ctxTarget.value.substring(end);
-        ctxTarget.selectionStart = start;
-        ctxTarget.selectionEnd = start + transformed.length;
-      } else {
-        ctxTarget.value = transformed;
-      }
-      ctxTarget.dispatchEvent(new Event('input', { bubbles: true }));
-    } else {
-      const sel = window.getSelection();
-      if (sel && sel.toString().trim().length > 0) {
-        const fullText = ctxTarget.textContent;
-        const selText = sel.toString();
-        ctxTarget.textContent = fullText.replace(selText, transformed);
-      } else {
-        ctxTarget.textContent = transformed;
-      }
-    }
-  }
-  ctxMenu.querySelectorAll(".ctx-item").forEach(item => {
-    item.addEventListener("click", (e) => {
-      e.stopPropagation();
-      ctxMenu.classList.add("hidden");
-
-      const action = item.getAttribute("data-action");
-      const selectedText = getSelectedText();
-      if (!selectedText) return;
-
-      let result = selectedText;
-      switch (action) {
-        case "ctx-base64-encode":
-          try { result = btoa(selectedText); } catch { result = "Error encoding Base64"; }
-          break;
-        case "ctx-base64-decode":
-          try { result = atob(selectedText); } catch { result = "Error decoding Base64"; }
-          break;
-        case "ctx-url-encode":
-          result = encodeURIComponent(selectedText);
-          break;
-        case "ctx-url-decode":
-          try { result = decodeURIComponent(selectedText); } catch { result = selectedText; }
-          break;
-        case "ctx-hex-encode":
-          result = selectedText.split('').map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' ');
-          break;
-        case "ctx-hex-decode":
-          try {
-            const clean = selectedText.replace(/\s+/g, '');
-            let decoded = '';
-            for (let i = 0; i < clean.length; i += 2) { decoded += String.fromCharCode(parseInt(clean.substr(i, 2), 16)); }
-            result = decoded;
-          } catch { result = "Error decoding Hex"; }
-          break;
-        case "ctx-copy":
-          copyToClipboard(selectedText, "Copied to clipboard!");
-          return; // Don't replace text for copy
-      }
-
-      replaceSelectedText(result);
-    });
-  });
-}
 
 function populateFuzzDictionary(type, interactiveUrl = "INTERACTSH_DOMAIN_HERE") {
   if (!NucleiFuzzDictionaries[type]) return;
@@ -1943,6 +1914,93 @@ function initToolsTab() {
   document.getElementById('tools-vt-btn')?.addEventListener('click', checkToolsVirusTotal);
   document.getElementById('tools-intelx-btn')?.addEventListener('click', checkToolsIntelX);
   document.getElementById('tools-network-btn')?.addEventListener('click', checkToolsNetwork);
+  document.getElementById('cmp-run-btn')?.addEventListener('click', runComparer);
+  document.getElementById('cmp-swap')?.addEventListener('click', () => {
+    const l = document.getElementById('cmp-left'), r = document.getElementById('cmp-right');
+    [l.value, r.value] = [r.value, l.value];
+    runComparer();
+  });
+  document.getElementById('cmp-clear')?.addEventListener('click', () => {
+    document.getElementById('cmp-left').value = '';
+    document.getElementById('cmp-right').value = '';
+    document.getElementById('cmp-results').innerHTML = '';
+  });
+  document.getElementById('dec-input')?.addEventListener('input', renderDecoder);
+}
+
+function runComparer() {
+  const left = document.getElementById('cmp-left').value;
+  const right = document.getElementById('cmp-right').value;
+  const out = document.getElementById('cmp-results');
+  if (!left && !right) { out.innerHTML = '<span style="color:var(--text3)">Paste responses into both sides.</span>'; return; }
+
+  const linesA = ('\n' + left).split('\n');
+  const linesB = ('\n' + right).split('\n');
+  const n = linesA.length, m = linesB.length;
+  const maxLines = 2000;
+  if (n > maxLines || m > maxLines) {
+    out.innerHTML = `<span style="color:var(--danger)">Response too large (${n} / ${m} lines). Max ${maxLines}.</span>`;
+    return;
+  }
+
+  const dp = Array.from({length: n}, () => new Int16Array(m));
+  for (let i = 1; i < n; i++)
+    for (let j = 1; j < m; j++)
+      dp[i][j] = linesA[i] === linesB[j] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1]);
+
+  const ops = [];
+  let i = n - 1, j = m - 1;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && linesA[i] === linesB[j]) { ops.push({t:' ', l:linesA[i]}); i--; j--; }
+    else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) { ops.push({t:'+', l:linesB[j]}); j--; }
+    else { ops.push({t:'-', l:linesA[i]}); i--; }
+  }
+  ops.reverse();
+
+  const counts = ops.reduce((a, o) => { a[o.t]++; return a; }, {'+':0,'-':0,' ':0});
+  out.innerHTML = `<div style="color:var(--text3);font-size:10px;margin-bottom:4px;">+${counts['+']} -${counts['-']} =${counts[' ']}</div>` +
+    ops.map(o => {
+      const c = o.t === '+' ? 'var(--accent2)' : o.t === '-' ? 'var(--danger)' : 'var(--text3)';
+      const bg = o.t === '+' ? 'rgba(63,185,80,.08)' : o.t === '-' ? 'rgba(248,81,73,.08)' : 'transparent';
+      return `<div style="color:${c};background:${bg}">${escapeHtml(o.t === '+' ? '+ ' : o.t === '-' ? '- ' : '  ') + escapeHtml(o.l)}</div>`;
+    }).join('');
+}
+
+function renderDecoder() {
+  const val = document.getElementById('dec-input').value;
+  const out = document.getElementById('dec-output');
+  if (!val) { out.innerHTML = ''; return; }
+
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(val);
+  let hexLadder = '';
+  for (let offset = 0; offset < bytes.length; offset += 16) {
+    const chunk = bytes.slice(offset, offset + 16);
+    const left = chunk.slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join(' ');
+    const right = chunk.slice(8, 16).map(b => b.toString(16).padStart(2, '0')).join(' ');
+    const ascii = chunk.map(b => b >= 32 && b <= 126 ? String.fromCharCode(b) : '.').join('');
+    hexLadder += `${offset.toString(16).padStart(8,'0')}  ${left.padEnd(23)} ${right.padEnd(23)} |${ascii}|\n`;
+  }
+
+  let b64 = '';
+  try { b64 = btoa(val); } catch { b64 = '(text may contain non-Latin1 chars)'; }
+  let b64decoded = '';
+  try { b64decoded = atob(val); } catch { b64decoded = '(not valid base64)'; }
+  const urlEnc = encodeURIComponent(val);
+  let urlDec = '';
+  try { urlDec = decodeURIComponent(val); } catch { urlDec = val; }
+  const htmlEnc = val.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+
+  out.innerHTML =
+    `<div style="background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px;">` +
+    `<div style="font-weight:bold;color:var(--accent2);font-size:10px;margin-bottom:4px;">HEX LADDER</div>` +
+    `<pre style="margin:0;font-size:10px;line-height:1.5;color:var(--text);overflow:auto;max-height:200px;">${escapeHtml(hexLadder)}</pre></div>` +
+    `<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;margin-top:6px;">` +
+    `<span style="color:var(--text3)">BASE64 ENC</span><span style="color:var(--accent);word-break:break-all">${escapeHtml(b64)}</span>` +
+    `<span style="color:var(--text3)">BASE64 DEC</span><span style="color:var(--accent);word-break:break-all">${escapeHtml(b64decoded)}</span>` +
+    `<span style="color:var(--text3)">URL ENC</span><span style="color:var(--accent);word-break:break-all">${escapeHtml(urlEnc)}</span>` +
+    `<span style="color:var(--text3)">URL DEC</span><span style="color:var(--accent);word-break:break-all">${escapeHtml(urlDec)}</span>` +
+    `<span style="color:var(--text3)">HTML ENC</span><span style="color:var(--accent);word-break:break-all">${escapeHtml(htmlEnc)}</span></div>`;
 }
 
 async function checkToolsSubdomains() {

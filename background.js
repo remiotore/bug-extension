@@ -2,18 +2,11 @@ const connectedPanels = new Map();
 const requestMap = new Map();
 const interceptState = new Map();
 let endpoints = new Map();
-let dynamicPatterns = new Map();
 let saveTimeout = null;
 let customHeaderConfig = { enabled: false, name: 'User-Agent', value: 'x-bug-bounty' };
 let fuzzReplayActive = false;
 
-const CONFIG = {
-  IGNORED_EXTENSIONS: ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.woff', '.woff2', '.ttf', '.m4s', '.ico', '.eot', '.otf'],
-  get SENSITIVE_PATHS() { return TAG_DETECTION.SENSITIVE_PATHS || []; },
-  get SENSITIVE_PARAMS() { return TAG_DETECTION.SENSITIVE_PARAMS || []; },
-  get SENSITIVE_METHODS() { return TAG_DETECTION.SENSITIVE_METHODS || []; },
-  get TAG_RULES() { return TAG_DETECTION.TAG_RULES || {}; }
-};
+const IGNORED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.woff', '.woff2', '.ttf', '.m4s', '.ico', '.eot', '.otf'];
 
 function normalizeTabId(tabId) {
   const id = Number(tabId);
@@ -33,7 +26,7 @@ function getPanelPort(tabId) {
 function isInteresting(details) {
   const urlLower = (details.url || '').toLowerCase();
   const type = details.type || '';
-  if (CONFIG.IGNORED_EXTENSIONS.some(ext => urlLower.includes(ext))) return false;
+  if (IGNORED_EXTENSIONS.some(ext => urlLower.includes(ext))) return false;
   if (urlLower.includes('.php')) return true;
   if (type === 'xmlhttprequest' || type === 'fetch') return true;
   if (urlLower.includes('.css') && type !== 'xmlhttprequest') return false;
@@ -52,7 +45,6 @@ function saveEndpoints() {
   saveTimeout = setTimeout(() => {
     browser.storage.local.set({
       endpoints: Array.from(endpoints.values()),
-      dynamicPatterns: Array.from(dynamicPatterns.entries()),
       lastUpdate: Date.now()
     });
   }, 400);
@@ -60,21 +52,11 @@ function saveEndpoints() {
 
 function clearEndpointsStorage() {
   endpoints.clear();
-  dynamicPatterns.clear();
-  try { browser.storage.local.remove(['endpoints', 'dynamicPatterns', 'lastUpdate']); } catch (e) {}
+  try { browser.storage.local.remove(['endpoints', 'lastUpdate']); } catch (e) {}
 }
 
-clearEndpointsStorage();
-
-try {
-  if (browser.runtime?.onInstalled) browser.runtime.onInstalled.addListener(clearEndpointsStorage);
-  if (browser.runtime?.onStartup) browser.runtime.onStartup.addListener(clearEndpointsStorage);
-  if (browser.runtime?.onSuspend) browser.runtime.onSuspend.addListener(clearEndpointsStorage);
-} catch (e) {}
-
-browser.storage.local.get(['endpoints', 'dynamicPatterns']).then(data => {
+browser.storage.local.get(['endpoints']).then(data => {
   if (data.endpoints) endpoints = new Map(data.endpoints.map(e => [e.method + ' ' + e.url, e]));
-  if (data.dynamicPatterns) dynamicPatterns = new Map(data.dynamicPatterns);
 });
 
 function parseRequestBody(requestBody) {
@@ -309,60 +291,11 @@ browser.runtime.onConnect.addListener((port) => {
 browser.runtime.onMessage.addListener((msg) => {
   if (msg?.action === "clear-endpoints") {
     endpoints.clear();
-    dynamicPatterns.clear();
-    browser.storage.local.set({ endpoints: [], dynamicPatterns: [], lastUpdate: Date.now() });
+    browser.storage.local.set({ endpoints: [], lastUpdate: Date.now() });
   }
 });
 
-const CONTEXT_MENUS = [
-  { id: "bug-base64-encode", title: "Base64 Encode" },
-  { id: "bug-base64-decode", title: "Base64 Decode" },
-  { id: "bug-url-encode", title: "URL Encode" },
-  { id: "bug-url-decode", title: "URL Decode" },
-  { id: "bug-wayback", title: "Check Wayback Machine" }
-];
 
-browser.contextMenus.removeAll().then(() => {
-  browser.contextMenus.create({ id: "bug-extension-parent", title: "🐛 Bug Extension", contexts: ["selection", "link", "page"] });
-  CONTEXT_MENUS.forEach(item => {
-    browser.contextMenus.create({ id: item.id, parentId: "bug-extension-parent", title: item.title, contexts: ["selection", "link", "page"] });
-  });
-});
-
-browser.contextMenus.onClicked.addListener((info, tab) => {
-  const text = info.selectionText || info.linkUrl || info.pageUrl || '';
-  let result = '';
-  switch (info.menuItemId) {
-    case 'bug-base64-encode':
-      try { result = btoa(text); } catch { result = 'Error: invalid input'; }
-      break;
-    case 'bug-base64-decode':
-      try { result = atob(text); } catch { result = 'Error: invalid base64'; }
-      break;
-    case 'bug-url-encode':
-      result = encodeURIComponent(text);
-      break;
-    case 'bug-url-decode':
-      try { result = decodeURIComponent(text); } catch { result = text; }
-      break;
-    case 'bug-wayback':
-      browser.tabs.create({ url: `https://web.archive.org/web/*/${encodeURIComponent(info.linkUrl || info.pageUrl || text)}` });
-      return;
-  }
-  if (result && tab?.id) {
-    browser.tabs.executeScript(tab.id, {
-      code: `
-        navigator.clipboard.writeText(${JSON.stringify(result)}).then(() => {
-          const toast = document.createElement('div');
-          toast.textContent = 'Copied: ' + ${JSON.stringify(result.substring(0, 80))};
-          toast.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#1a1a2e;color:#0f0;padding:12px 20px;border-radius:8px;z-index:999999;font-family:monospace;border:1px solid #0f0;box-shadow:0 4px 20px rgba(0,255,0,0.2);';
-          document.body.appendChild(toast);
-          setTimeout(() => toast.remove(), 3000);
-        });
-      `
-    });
-  }
-});
 
 setInterval(() => {
   const now = Date.now();

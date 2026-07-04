@@ -92,6 +92,14 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .req-item.finding-auth { box-shadow: inset 0 0 0 1px rgba(240,136,62,.12), inset 4px 0 0 var(--tag-auth); }
 .req-item.finding-sensitive { box-shadow: inset 0 0 0 1px rgba(248,81,73,.12), inset 4px 0 0 var(--danger); }
 .icon-btn.intercept-mode { background: var(--accent3); color: #fff; border-color: var(--accent3); }
+.req-finding-chip.interesting { background: rgba(248,81,73,.16); color: #ff6b6b; border-color: rgba(248,81,73,.28); }
+.req-item.finding-interesting { box-shadow: inset 0 0 0 1px rgba(248,81,73,.12), inset 4px 0 0 #ff6b6b; }
+.quick-fuzz-btn { background:none; border:1px solid var(--border); color:var(--text3); cursor:pointer; font-size:11px; padding:1px 5px; border-radius:3px; line-height:1.4; transition:all .12s; flex-shrink:0; }
+.quick-fuzz-btn:hover { background:var(--accent); color:#fff; border-color:var(--accent); }
+.quick-fuzz-dropdown { position:absolute; top:100%; left:0; background:var(--bg2); border:1px solid var(--border); border-radius:4px; z-index:100; min-width:100px; box-shadow:0 4px 12px var(--shadow); display:none; }
+.quick-fuzz-dropdown.show { display:block; }
+.quick-fuzz-dropdown > div { padding:5px 10px; cursor:pointer; font-size:11px; color:var(--text2); white-space:nowrap; }
+.quick-fuzz-dropdown > div:hover { background:var(--bg4); color:var(--text); }
 
 .detail-section { display: flex; justify-content: space-between; align-items: center; padding: 4px 10px; background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .detail-tabs { display: flex; gap: 2px; }
@@ -194,11 +202,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .empty-icon { font-size: 36px; }
 .empty-hint { font-size: 11px; }
 
-.ctx-menu { position: fixed; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 24px var(--shadow); padding: 4px; z-index: 9999; min-width: 160px; }
-.ctx-menu.hidden { display: none; }
-.ctx-item { padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; }
-.ctx-item:hover { background: var(--bg4); }
-.ctx-sep { height: 1px; background: var(--border); margin: 3px 8px; }
+
 
 @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .req-item { animation: fadeIn .15s ease; }
