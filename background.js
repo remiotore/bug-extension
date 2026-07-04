@@ -150,12 +150,10 @@ function handleBeforeSendHeaders(details) {
   }
 
   if (customHeaderConfig.enabled && !fuzzReplayActive) {
-    const existing = headers.find(h => h.name.toLowerCase() === customHeaderConfig.name.toLowerCase());
-    if (!existing) {
-      headers.push({ name: customHeaderConfig.name, value: customHeaderConfig.value });
-    }
-    if (req) req.requestHeaders = headers;
-    return { requestHeaders: headers };
+    const filtered = headers.filter(h => h.name.toLowerCase() !== customHeaderConfig.name.toLowerCase());
+    filtered.push({ name: customHeaderConfig.name, value: customHeaderConfig.value });
+    if (req) req.requestHeaders = filtered;
+    return { requestHeaders: filtered };
   }
 
   if (req) req.requestHeaders = details.requestHeaders;

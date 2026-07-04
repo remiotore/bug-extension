@@ -962,48 +962,23 @@ function handleModify(req) {
 }
 
 let currentFuzzParameters = [];
+let selectedFuzzParamIndex = -1;
 
-function buildDictionaryOptionsHtml(selectedValue) {
-  const presets = [
-    { value: '', label: '-- None --' },
-    { value: 'custom', label: '✨ Custom' },
-    { value: 'cmdi', label: '🐚 CMDi' },
-    { value: 'lfi', label: '📂 LFI' },
-    { value: 'xss', label: '🎨 XSS' },
-    { value: 'sqli', label: '🗄️ SQLi' },
-    { value: 'nosqli', label: '🧩 NoSQLi' },
-    { value: 'ssrf', label: '🌐 SSRF' },
-    { value: 'ssti', label: '🧩 SSTI' },
-    { value: 'xxe', label: '📜 XXE' },
-    { value: 'open_redirect', label: '↪️ Redirect' },
-    { value: 'crlf', label: '↩️ CRLF' },
-    { value: 'prototype_pollution', label: '🧬 Proto' },
-    { value: 'rce_deserialization', label: '⚡ RCE' },
-    { value: 'idor', label: '🔑 IDOR' },
-    { value: 'hidden_params', label: '⚙️ Params' },
-    { value: 'csv', label: '📊 CSV' },
-    { value: 'business_logic_hpp', label: '💰 HPP' },
-  ];
-  const generators = [
-    { value: '__numbers__', label: '🔢 Numbers' },
-    { value: '__dates__', label: '📅 Dates' },
-    { value: '__letters__', label: '🔤 Letters' },
-    { value: '__wordlist_params__', label: '📋 Common Params' },
-    { value: '__wordlist_paths__', label: '📋 Common Paths' },
-  ];
-  return presets.concat(generators).map(p => `<option value="${p.value}" ${p.value === selectedValue ? 'selected' : ''}>${p.label}</option>`).join('');
+function createDefaultFuzzParam(type, key, value, active) {
+  return { type, key, value, active, fuzzMode: 'preset', fuzzPreset: '', customPayloads: '', numberFrom: 0, numberTo: 9999, numberPadding: 'none', dateFrom: '2020-01-01', dateTo: '2025-12-31', letterMax: 3, wordlistType: 'common_params' };
 }
 
 function setupFuzzerTabFromSelectedRequest(req) {
   if (!req) return;
-
   let baseSplit = req.url.split('?');
-  document.getElementById("fuzz-url").value = baseSplit[0];
+  const urlInput = document.getElementById("fuzz-url");
+  urlInput.value = baseSplit[0];
+  urlInput.dataset.cleanBase = baseSplit[0];
   currentFuzzParameters = [];
   if (baseSplit.length > 1) {
     let searchParams = new URLSearchParams(baseSplit[1]);
     for (let [key, value] of searchParams.entries()) {
-      currentFuzzParameters.push({ type: 'query', key: key, value: value, active: true, dictionary: '' });
+      currentFuzzParameters.push(createDefaultFuzzParam('query', key, value, true));
     }
   }
   try {
@@ -1013,10 +988,10 @@ function setupFuzzerTabFromSelectedRequest(req) {
         const [key, ...rest] = segment.split('=');
         const value = rest.join('=');
         if (key && value !== undefined) {
-          currentFuzzParameters.push({ type: 'path', key: key, value: value, active: true, dictionary: '' });
+          currentFuzzParameters.push(createDefaultFuzzParam('path', key, value, true));
         }
       } else {
-        currentFuzzParameters.push({ type: 'path', key: segment, value: segment, active: false, dictionary: '' });
+        currentFuzzParameters.push(createDefaultFuzzParam('path', segment, segment, false));
       }
     });
   } catch (e) {
@@ -1027,13 +1002,13 @@ function setupFuzzerTabFromSelectedRequest(req) {
       try {
         let json = JSON.parse(bodyStr);
         for (let [key, value] of Object.entries(json)) {
-          currentFuzzParameters.push({ type: 'body-json', key: key, value: String(value), active: true, dictionary: '' });
+          currentFuzzParameters.push(createDefaultFuzzParam('body-json', key, String(value), true));
         }
       } catch (e) { }
     } else {
       let bodyParams = new URLSearchParams(bodyStr);
       for (let [key, value] of bodyParams.entries()) {
-        currentFuzzParameters.push({ type: 'body-form', key: key, value: value, active: true, dictionary: '' });
+        currentFuzzParameters.push(createDefaultFuzzParam('body-form', key, value, true));
       }
     }
   }
@@ -1042,72 +1017,235 @@ function setupFuzzerTabFromSelectedRequest(req) {
     req.requestHeaders.forEach(h => {
       const headerName = (h.name || '').toLowerCase();
       if (h.name && !headersToSkip.includes(headerName)) {
-        currentFuzzParameters.push({ type: 'header', key: h.name, value: h.value || '', active: false, dictionary: '' });
+        currentFuzzParameters.push(createDefaultFuzzParam('header', h.name, h.value || '', false));
       }
     });
   }
 
-  renderFuzzerParameterMatrixRows();
+  selectedFuzzParamIndex = currentFuzzParameters.length > 0 ? 0 : -1;
+  renderFuzzerParamList();
+  syncRequestFromParams();
 }
 
-function renderFuzzerParameterMatrixRows() {
-  const container = document.getElementById("fuzz-param-list-container");
+function addNewBlankParameterRow() {
+  currentFuzzParameters.push(createDefaultFuzzParam('query', 'param_name', 'test_value', false));
+  selectedFuzzParamIndex = currentFuzzParameters.length - 1;
+  renderFuzzerParamList();
+  syncRequestFromParams();
+}
+
+function renderFuzzerParamList() {
+  const container = document.getElementById('fuzz-param-list');
   if (!container) return;
 
   if (currentFuzzParameters.length === 0) {
-    container.innerHTML = `<div class="empty-hint" style="text-align: center; margin-top: 20px;">No targets identified. Click "+ Add Target" to add custom rows.</div>`;
+    container.innerHTML = `<div style="color: var(--text3); font-size: 11px; text-align: center; margin-top: 20px;">No targets identified. Click "+ Add Target" to add custom rows.</div>`;
+    renderFuzzerOptionsPanel();
     return;
   }
 
-  container.innerHTML = "";
-  currentFuzzParameters.forEach((param, index) => {
-    const row = document.createElement("div");
-    row.style.cssText = "display: flex; gap: 4px; align-items: center; background: var(--bg3); padding: 4px; border-radius: var(--radius); border: 1px solid var(--border); margin-bottom: 2px;";
+  if (selectedFuzzParamIndex >= currentFuzzParameters.length) selectedFuzzParamIndex = currentFuzzParameters.length - 1;
+  if (selectedFuzzParamIndex < 0 && currentFuzzParameters.length > 0) selectedFuzzParamIndex = 0;
 
-    const checkedAttr = param.active ? 'checked' : '';
-    const rowOpacity = param.active ? '1' : '0.6';
-    const isUrlTarget = param.type === 'url' || param.type === 'path';
+  container.innerHTML = '';
+  currentFuzzParameters.forEach((param, index) => {
+    const sel = index === selectedFuzzParamIndex;
+    const row = document.createElement('div');
+    row.style.cssText = `display: flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: 4px; cursor: pointer; background: ${sel ? 'var(--accent)' : 'var(--bg3)'}; border: 1px solid ${sel ? 'var(--accent2)' : 'var(--border)'}; opacity: ${param.active ? '1' : '0.55'}; transition: background 0.1s;`;
+    row.addEventListener('click', () => {
+      selectedFuzzParamIndex = index;
+      renderFuzzerParamList();
+    });
+
+    const typeLabel = (param.type === 'body-form' || param.type === 'body-json') ? 'body' : param.type;
 
     row.innerHTML = `
-      <input type="checkbox" id="fuzz-chk-${index}" ${checkedAttr} style="margin: 0; cursor: pointer;" title="Check to fuzz this target">
-      <select id="fuzz-type-${index}" style="font-size: 9px; padding: 1px 4px; border-radius: 4px; background: var(--bg4); font-family: var(--mono); color: var(--text2); min-width: 56px; text-align: center;" title="Target type">
-        <option value="query" ${param.type === 'query' ? 'selected' : ''}>query</option>
-        <option value="body-form" ${param.type === 'body-form' ? 'selected' : ''}>body-form</option>
-        <option value="body-json" ${param.type === 'body-json' ? 'selected' : ''}>body-json</option>
-        <option value="header" ${param.type === 'header' ? 'selected' : ''}>header</option>
-        <option value="url" ${isUrlTarget ? 'selected' : ''}>url</option>
-        <option value="path" ${param.type === 'path' ? 'selected' : ''}>path</option>
-      </select>
-      <input type="text" value="${escapeHtml(param.key)}" id="fuzz-key-${index}" style="flex: 0.8; height: 18px; font-size: 11px; background: var(--bg); border: 1px solid var(--border); color: var(--accent); padding: 0 4px; border-radius: 4px; font-family: var(--mono); margin: 0;" placeholder="name or label">
-      <input type="text" value="${escapeHtml(param.value)}" id="fuzz-val-${index}" style="flex: 1.2; height: 18px; font-size: 11px; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 0 4px; border-radius: 4px; font-family: var(--mono); margin: 0; opacity: ${rowOpacity};" placeholder="${isUrlTarget ? 'URL/path value' : 'original value'}">
-      <select id="fuzz-dict-${index}" style="flex: 1.4; height: 20px; font-size: 10px; background: var(--bg); border: 1px solid ${param.active && param.dictionary ? 'var(--accent2)' : 'var(--border)'}; color: var(--text); padding: 0 2px; border-radius: 4px; font-family: sans-serif; margin: 0; cursor: pointer;" ${!param.active ? 'disabled' : ''} title="Attack dictionary for this target">
-        ${buildDictionaryOptionsHtml(param.dictionary)}
-      </select>
-      <button class="tool-btn" id="fuzz-del-${index}" style="height: 18px; padding: 0 4px; font-size: 10px; color: var(--danger); background: transparent; border: none; margin: 0; cursor: pointer;" title="Remove target">✕</button>
-    `;
-    row.querySelector(`#fuzz-chk-${index}`).addEventListener("change", (e) => {
-      param.active = e.target.checked;
-      renderFuzzerParameterMatrixRows(); // Re-render to update visual state
-    });
-    row.querySelector(`#fuzz-type-${index}`).addEventListener("change", (e) => {
-      param.type = e.target.value;
-      renderFuzzerParameterMatrixRows();
-    });
-    row.querySelector(`#fuzz-key-${index}`).addEventListener("input", (e) => { param.key = e.target.value; });
-    row.querySelector(`#fuzz-val-${index}`).addEventListener("input", (e) => { param.value = e.target.value; });
-    row.querySelector(`#fuzz-dict-${index}`).addEventListener("change", (e) => { param.dictionary = e.target.value; });
-    row.querySelector(`#fuzz-del-${index}`).addEventListener("click", () => {
+      <input type="checkbox" ${param.active ? 'checked' : ''} style="margin: 0; cursor: pointer; flex-shrink: 0;" title="Enable fuzzing">
+      <span style="font-size: 9px; font-family: var(--mono); color: ${sel ? '#fff' : 'var(--accent2)'}; background: ${sel ? 'rgba(255,255,255,0.2)' : 'var(--bg4)'}; padding: 1px 4px; border-radius: 3px; min-width: 36px; text-align: center; flex-shrink: 0;">${typeLabel}</span>
+      <span style="flex: 1; font-size: 11px; font-family: var(--mono); color: ${sel ? '#fff' : 'var(--accent)'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(param.key)}</span>
+      <span style="font-size: 9px; color: ${sel ? 'rgba(255,255,255,0.7)' : 'var(--text3)'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55px; flex-shrink: 0;">${escapeHtml(param.value)}</span>
+      <button style="background: none; border: none; color: ${sel ? 'rgba(255,255,255,0.7)' : 'var(--danger)'}; cursor: pointer; padding: 0 2px; font-size: 11px; flex-shrink: 0;" title="Remove">&times;</button>`;
+
+    const chk = row.querySelector('input[type="checkbox"]');
+    chk.addEventListener('click', (e) => { e.stopPropagation(); });
+    chk.addEventListener('change', (e) => { param.active = e.target.checked; renderFuzzerParamList(); syncRequestFromParams(); });
+    row.querySelector('button').addEventListener('click', (e) => {
+      e.stopPropagation();
       currentFuzzParameters.splice(index, 1);
-      renderFuzzerParameterMatrixRows();
+      if (selectedFuzzParamIndex >= currentFuzzParameters.length) selectedFuzzParamIndex = currentFuzzParameters.length - 1;
+      renderFuzzerParamList();
+      syncRequestFromParams();
     });
 
     container.appendChild(row);
   });
+
+  renderFuzzerOptionsPanel();
 }
 
-function addNewBlankParameterRow() {
-  currentFuzzParameters.push({ type: 'query', key: 'param_name', value: 'test_value', active: false, dictionary: '' });
-  renderFuzzerParameterMatrixRows();
+function renderFuzzerOptionsPanel() {
+  const placeholder = document.getElementById('fuzz-options-placeholder');
+  const content = document.getElementById('fuzz-options-content');
+  if (!placeholder || !content) return;
+
+  if (currentFuzzParameters.length === 0 || selectedFuzzParamIndex < 0 || selectedFuzzParamIndex >= currentFuzzParameters.length) {
+    placeholder.style.display = '';
+    content.style.display = 'none';
+    return;
+  }
+  placeholder.style.display = 'none';
+  content.style.display = 'flex';
+  content.style.flexDirection = 'column';
+
+  const param = currentFuzzParameters[selectedFuzzParamIndex];
+  content.innerHTML = buildFuzzOptionsHtml(param);
+
+  content.querySelectorAll('.fuzz-mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => { param.fuzzMode = btn.dataset.mode; renderFuzzerOptionsPanel(); renderFuzzerParamList(); });
+  });
+  content.querySelector('#fuzz-opt-type')?.addEventListener('change', (e) => { param.type = e.target.value; renderFuzzerParamList(); syncRequestFromParams(); });
+  content.querySelector('#fuzz-opt-key')?.addEventListener('input', (e) => { param.key = e.target.value; renderFuzzerParamList(); syncRequestFromParams(); });
+  content.querySelector('#fuzz-opt-val')?.addEventListener('input', (e) => { param.value = e.target.value; renderFuzzerParamList(); syncRequestFromParams(); });
+
+  const h = (sel, prop, evt, fn) => { const el = content.querySelector(sel); if (el) el.addEventListener(evt || 'change', (e) => { param[prop] = fn ? fn(e.target.value) : e.target.value; updateFuzzPayloadPreview(); }); };
+  h('#fuzz-opt-custom', 'customPayloads', 'input');
+  h('#fuzz-opt-num-from', 'numberFrom', 'input', v => parseInt(v) || 0);
+  h('#fuzz-opt-num-to', 'numberTo', 'input', v => parseInt(v) || 0);
+  h('#fuzz-opt-num-pad', 'numberPadding');
+  h('#fuzz-opt-date-from', 'dateFrom');
+  h('#fuzz-opt-date-to', 'dateTo');
+  h('#fuzz-opt-letter-max', 'letterMax', 'input', v => parseInt(v) || 1);
+  h('#fuzz-opt-wordlist', 'wordlistType');
+  h('#fuzz-opt-preset', 'fuzzPreset');
+
+  updateFuzzPayloadPreview();
+}
+
+function buildFuzzOptionsHtml(p) {
+  const mode = p.fuzzMode || 'preset';
+  const modes = ['preset', 'custom', 'numbers', 'dates', 'letters', 'wordlist'];
+  const modeLabels = { preset: '📖 Preset', custom: '✏️ Custom', numbers: '🔢 Numbers', dates: '📅 Dates', letters: '🔤 Letters', wordlist: '📋 Wordlist' };
+
+  let modeConfigHtml = '';
+  switch (mode) {
+    case 'custom':
+      modeConfigHtml = `<label style="font-size: 10px; color: var(--text3); display: block; margin-bottom: 2px;">Payloads (one per line):</label><textarea id="fuzz-opt-custom" style="width: 100%; height: 70px; font-size: 11px; font-family: var(--mono); background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 4px; border-radius: 4px; resize: vertical; box-sizing: border-box;">${escapeHtml(p.customPayloads)}</textarea>`;
+      break;
+    case 'numbers':
+      modeConfigHtml = `<div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; font-size: 11px;">
+        <span style="color: var(--text3);">From:</span><input type="number" id="fuzz-opt-num-from" value="${p.numberFrom}" style="width: 100px; font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--bg3); border: 1px solid var(--border); color: var(--text);">
+        <span style="color: var(--text3);">To:</span><input type="number" id="fuzz-opt-num-to" value="${p.numberTo}" style="width: 100px; font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--bg3); border: 1px solid var(--border); color: var(--text);">
+        <span style="color: var(--text3);">Padding:</span>
+        <select id="fuzz-opt-num-pad" style="width: 110px; font-size: 10px; padding: 2px 4px; border-radius: 4px; background: var(--bg3); border: 1px solid var(--border); color: var(--text);">
+          <option value="none" ${p.numberPadding === 'none' ? 'selected' : ''}>None</option>
+          <option value="zero" ${p.numberPadding === 'zero' ? 'selected' : ''}>Zero-padded</option>
+          <option value="space" ${p.numberPadding === 'space' ? 'selected' : ''}>Space-padded</option>
+        </select>
+      </div>`;
+      break;
+    case 'dates':
+      modeConfigHtml = `<div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; font-size: 11px;">
+        <span style="color: var(--text3);">From:</span><input type="date" id="fuzz-opt-date-from" value="${p.dateFrom}" style="width: 140px; font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--bg3); border: 1px solid var(--border); color: var(--text);">
+        <span style="color: var(--text3);">To:</span><input type="date" id="fuzz-opt-date-to" value="${p.dateTo}" style="width: 140px; font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--bg3); border: 1px solid var(--border); color: var(--text);">
+      </div>`;
+      break;
+    case 'letters':
+      modeConfigHtml = `<div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; font-size: 11px;">
+        <span style="color: var(--text3);">Max Length:</span><input type="number" id="fuzz-opt-letter-max" value="${p.letterMax}" min="1" max="5" style="width: 80px; font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--bg3); border: 1px solid var(--border); color: var(--text);">
+      </div>`;
+      break;
+    case 'wordlist':
+      modeConfigHtml = `<div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; font-size: 11px;">
+        <span style="color: var(--text3);">Wordlist:</span>
+        <select id="fuzz-opt-wordlist" style="width: 150px; font-size: 10px; padding: 2px 4px; border-radius: 4px; background: var(--bg3); border: 1px solid var(--border); color: var(--text);">
+          <option value="common_params" ${p.wordlistType === 'common_params' ? 'selected' : ''}>Common Params</option>
+          <option value="common_paths" ${p.wordlistType === 'common_paths' ? 'selected' : ''}>Common Paths</option>
+        </select>
+      </div>`;
+      break;
+    default:
+      modeConfigHtml = `<div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; font-size: 11px;">
+        <span style="color: var(--text3);">Dictionary:</span>
+        <select id="fuzz-opt-preset" style="width: 200px; font-size: 10px; padding: 2px 4px; border-radius: 4px; background: var(--bg3); border: 1px solid var(--border); color: var(--text);">
+          <option value="" ${p.fuzzPreset === '' ? 'selected' : ''}>-- None --</option>
+          <option value="cmdi" ${p.fuzzPreset === 'cmdi' ? 'selected' : ''}>&#x1F41A; CMDi</option>
+          <option value="lfi" ${p.fuzzPreset === 'lfi' ? 'selected' : ''}>&#x1F4C2; LFI</option>
+          <option value="xss" ${p.fuzzPreset === 'xss' ? 'selected' : ''}>&#x1F3A8; XSS</option>
+          <option value="sqli" ${p.fuzzPreset === 'sqli' ? 'selected' : ''}>&#x1F5C4;&#xFE0F; SQLi</option>
+          <option value="nosqli" ${p.fuzzPreset === 'nosqli' ? 'selected' : ''}>&#x1F9E9; NoSQLi</option>
+          <option value="ssrf" ${p.fuzzPreset === 'ssrf' ? 'selected' : ''}>&#x1F310; SSRF</option>
+          <option value="ssti" ${p.fuzzPreset === 'ssti' ? 'selected' : ''}>&#x1F9E9; SSTI</option>
+          <option value="xxe" ${p.fuzzPreset === 'xxe' ? 'selected' : ''}>&#x1F4DC; XXE</option>
+          <option value="open_redirect" ${p.fuzzPreset === 'open_redirect' ? 'selected' : ''}>&#x21AA;&#xFE0F; Redirect</option>
+          <option value="crlf" ${p.fuzzPreset === 'crlf' ? 'selected' : ''}>&#x21A9;&#xFE0F; CRLF</option>
+          <option value="prototype_pollution" ${p.fuzzPreset === 'prototype_pollution' ? 'selected' : ''}>&#x1F9EC; Proto</option>
+          <option value="rce_deserialization" ${p.fuzzPreset === 'rce_deserialization' ? 'selected' : ''}>&#x26A1; RCE</option>
+          <option value="idor" ${p.fuzzPreset === 'idor' ? 'selected' : ''}>&#x1F511; IDOR</option>
+          <option value="hidden_params" ${p.fuzzPreset === 'hidden_params' ? 'selected' : ''}>&#x2699;&#xFE0F; Params</option>
+          <option value="csv" ${p.fuzzPreset === 'csv' ? 'selected' : ''}>&#x1F4CA; CSV</option>
+          <option value="business_logic_hpp" ${p.fuzzPreset === 'business_logic_hpp' ? 'selected' : ''}>&#x1F4B0; HPP</option>
+        </select>
+      </div>`;
+  }
+
+  return `
+    <div style="background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px;">
+      <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; font-size: 11px;">
+        <span style="color: var(--text3);">Location:</span>
+        <select id="fuzz-opt-type" style="font-size: 10px; padding: 2px 4px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); color: var(--text); font-family: var(--mono); width: 120px;">
+          ${['query', 'body-form', 'body-json', 'header', 'url', 'path'].map(t => `<option value="${t}" ${p.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+        </select>
+        <span style="color: var(--text3);">Name:</span>
+        <input type="text" id="fuzz-opt-key" value="${escapeHtml(p.key)}" style="font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); color: var(--accent); font-family: var(--mono);">
+        <span style="color: var(--text3);">Value:</span>
+        <input type="text" id="fuzz-opt-val" value="${escapeHtml(p.value)}" style="font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); color: var(--text); font-family: var(--mono);">
+      </div>
+    </div>
+
+    <div style="flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; display: flex; flex-direction: column; min-height: 0;">
+      <div style="font-size: 10px; font-weight: bold; color: var(--text2); text-transform: uppercase; margin-bottom: 4px;">Fuzzing Mode</div>
+      <div style="display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px;">
+        ${modes.map(m => `<button class="fuzz-mode-btn" data-mode="${m}" style="font-size: 10px; padding: 3px 8px; border-radius: 4px; border: 1px solid ${mode === m ? 'var(--accent2)' : 'var(--border)'}; background: ${mode === m ? 'var(--accent)' : 'var(--bg4)'}; color: ${mode === m ? '#fff' : 'var(--text)'}; cursor: pointer;">${modeLabels[m]}</button>`).join('')}
+      </div>
+      <div id="fuzz-opt-mode-config">${modeConfigHtml}</div>
+      <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border); flex: 1; display: flex; flex-direction: column; min-height: 0;">
+        <div style="font-size: 10px; font-weight: bold; color: var(--text2); text-transform: uppercase; margin-bottom: 3px;">Payload Preview</div>
+        <textarea id="fuzz-payload-preview" readonly style="width: 100%; flex: 1; min-height: 40px; font-size: 10px; font-family: var(--mono); background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 4px; border-radius: 4px; resize: vertical; box-sizing: border-box;"></textarea>
+      </div>
+    </div>`;
+}
+
+function getPayloadsForParam(param) {
+  const dictionaries = (typeof NucleiFuzzDictionaries === 'object' && NucleiFuzzDictionaries) ? NucleiFuzzDictionaries : (window.NucleiFuzzDictionaries || null);
+  switch (param.fuzzMode) {
+    case 'custom':
+      return param.customPayloads ? param.customPayloads.split('\n').map(s => s.trim()).filter(Boolean) : [];
+    case 'numbers': {
+      const from = param.numberFrom || 0;
+      const to = param.numberTo || 9999;
+      return FuzzerGenerator.numberRange(from, to, param.numberPadding || 'none');
+    }
+    case 'dates':
+      return FuzzerGenerator.dateRange(param.dateFrom || '2020-01-01', param.dateTo || '2025-12-31');
+    case 'letters':
+      return FuzzerGenerator.letterRange(param.letterMax || 3);
+    case 'wordlist':
+      return FuzzerGenerator.commonWordlist(param.wordlistType || 'common_params');
+    default:
+      if (!param.fuzzPreset || !dictionaries) return [];
+      return dictionaries[param.fuzzPreset] || [];
+  }
+}
+
+function updateFuzzPayloadPreview() {
+  const textarea = document.getElementById('fuzz-payload-preview');
+  if (!textarea) return;
+  if (!currentFuzzParameters[selectedFuzzParamIndex]) { textarea.value = ''; return; }
+  const payloads = getPayloadsForParam(currentFuzzParameters[selectedFuzzParamIndex]);
+  if (!payloads || payloads.length === 0) { textarea.value = '(no payloads configured)'; return; }
+  const maxPreview = 100;
+  const lines = payloads.slice(0, maxPreview);
+  textarea.value = lines.join('\n') + (payloads.length > maxPreview ? `\n\n... and ${payloads.length - maxPreview} more` : '');
 }
 
 function buildFuzzedUrl(baseUrl, runtimeValue) {
@@ -1150,9 +1288,40 @@ function appendQueryString(url, queryString) {
   return url.includes('?') ? `${url}&${queryString}` : `${url}?${queryString}`;
 }
 
+function syncRequestFromParams() {
+  const urlInput = document.getElementById('fuzz-url');
+  if (!urlInput) return;
+  const cleanBase = urlInput.dataset.cleanBase;
+  if (cleanBase === undefined) return;
+
+  const queryParams = currentFuzzParameters.filter(p => p.type === 'query');
+  const qs = queryParams.map(p => `${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`).join('&');
+  urlInput.value = qs ? `${cleanBase}?${qs}` : cleanBase;
+
+  const headerParams = currentFuzzParameters.filter(p => p.type === 'header');
+  document.getElementById('replay-headers').value = headerParams.map(p => `${p.key}: ${p.value}`).join('\n');
+
+  const bodyParams = currentFuzzParameters.filter(p => p.type === 'body-form' || p.type === 'body-json');
+  if (bodyParams.length > 0) {
+    const isJson = bodyParams.some(p => p.type === 'body-json');
+    if (isJson) {
+      const obj = {};
+      bodyParams.forEach(p => { obj[p.key] = p.value; });
+      document.getElementById('replay-body').value = JSON.stringify(obj, null, 2);
+    } else {
+      const usp = new URLSearchParams();
+      bodyParams.forEach(p => usp.append(p.key, p.value));
+      document.getElementById('replay-body').value = usp.toString();
+    }
+  } else {
+    document.getElementById('replay-body').value = '';
+  }
+}
+
 async function executeAttackMatrixPipeline() {
   port.postMessage({ type: 'set_fuzz_replay_active', active: true });
-  const baseUrl = document.getElementById("fuzz-url").value.trim();
+  const urlInput = document.getElementById("fuzz-url");
+  const baseUrl = urlInput.dataset.cleanBase || urlInput.value.trim();
   const oastDomain = document.getElementById("fuzz-oast-domain").value.trim() || "interact.sh";
   const fuzzDelay = parseInt(document.getElementById("fuzz-delay").value, 10) || 0;
   const useFfufAc = document.getElementById("fuzz-ffuf-ac").checked;
@@ -1174,9 +1343,9 @@ async function executeAttackMatrixPipeline() {
     alert("Please check at least one parameter to fuzz and select a dictionary.");
     return;
   }
-  const missingDict = targetParameters.filter(p => !p.dictionary);
-  if (missingDict.length > 0) {
-    alert(`Please select a dictionary for: ${missingDict.map(p => p.key).join(', ')}`);
+  const missingConfig = targetParameters.filter(p => { const pl = getPayloadsForParam(p); return !pl || pl.length === 0; });
+  if (missingConfig.length > 0) {
+    alert(`Please configure fuzzing options for: ${missingConfig.map(p => p.key).join(', ')}`);
     return;
   }
 
@@ -1192,7 +1361,7 @@ async function executeAttackMatrixPipeline() {
       const baselineReq = {
         method: document.getElementById("replay-method").value,
         url: baseUrl,
-        headers: {}, // simplified
+        headers: {},
         body: null
       };
       const baselineRes = await performRequestInPage(baselineReq);
@@ -1205,29 +1374,11 @@ async function executeAttackMatrixPipeline() {
       resultsConsole.innerHTML += `<span style="color: var(--danger);">⚠️ Calibration failed: ${e.message}</span><br><br>`;
     }
   }
-  const fuzzerSettings = (await browser.storage.local.get('fuzzer_settings')).fuzzer_settings || {};
 
   for (const fuzzTarget of targetParameters) {
-    let payloads;
-    const dict = fuzzTarget.dictionary;
-    if (dict === '__numbers__') {
-      const maxNum = fuzzerSettings.number_max || 9999;
-      const padding = fuzzerSettings.padding || 'none';
-      payloads = FuzzerGenerator.numberRange(0, maxNum, padding);
-    } else if (dict === '__dates__') {
-      payloads = FuzzerGenerator.dateRange('2020-01-01', '2025-12-31');
-    } else if (dict === '__letters__') {
-      const maxLen = fuzzerSettings.letter_max || 3;
-      payloads = FuzzerGenerator.letterRange(maxLen);
-    } else if (dict === '__wordlist_params__') {
-      payloads = FuzzerGenerator.commonWordlist('common_params');
-    } else if (dict === '__wordlist_paths__') {
-      payloads = FuzzerGenerator.commonWordlist('common_paths');
-    } else {
-      payloads = dictionaries[dict];
-    }
+    let payloads = getPayloadsForParam(fuzzTarget);
     if (!payloads || payloads.length === 0) {
-      resultsConsole.innerHTML += `<div style="color: var(--danger);">No payloads found for dictionary: ${escapeHtml(String(fuzzTarget.dictionary))}</div>`;
+      resultsConsole.innerHTML += `<div style="color: var(--danger);">No payloads for: ${escapeHtml(fuzzTarget.key)}</div>`;
       continue;
     }
 
@@ -1237,7 +1388,8 @@ async function executeAttackMatrixPipeline() {
     } else if (fuzzTarget.type === 'header') {
       targetLabel = 'header';
     }
-    resultsConsole.innerHTML += `<div style="color: var(--accent); border-bottom: 1px solid var(--border); padding: 4px 0; margin-bottom: 4px; font-weight: bold;">🎯 Fuzzing ${targetLabel}: <code>${escapeHtml(fuzzTarget.key || fuzzTarget.type)}</code> with <strong>${fuzzTarget.dictionary}</strong> (${payloads.length} payloads)</div>`;
+    const modeLabel = fuzzTarget.fuzzMode === 'preset' ? (fuzzTarget.fuzzPreset || 'none') : fuzzTarget.fuzzMode;
+    resultsConsole.innerHTML += `<div style="color: var(--accent); border-bottom: 1px solid var(--border); padding: 4px 0; margin-bottom: 4px; font-weight: bold;">🎯 Fuzzing ${targetLabel}: <code>${escapeHtml(fuzzTarget.key || fuzzTarget.type)}</code> with <strong>${modeLabel}</strong> (${payloads.length} payloads)</div>`;
 
     for (const rawPayload of payloads) {
       const currentPayload = rawPayload.replace(/{{marker}}/g, oastDomain);
